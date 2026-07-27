@@ -11,6 +11,8 @@ Layer (a) 服务算法 TODO：PptBeautifyClient.beautify_file。
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import httpx
 
 #: 上传完整 pptx 时用的 Content-Type。
@@ -71,6 +73,19 @@ class PptBeautifyClient:
           - self._client.post("/ppt/beautify", files=..., data=..., headers=self._auth_headers())
           - 测试断言请求体含 PPTX_MAGIC（b"PK\\x03\\x04"）——上传完整文件模式。
         """
+        with open(input_path, "rb") as f:
+            files = {"file": (Path(input_path).name, f, PPTX_CONTENT_TYPE)}
+            data = {"style": style, "privacy_mode": "full_file"}
+            response = self._client.post(
+                "/ppt/beautify",
+                files=files,
+                data=data,
+                headers=self._auth_headers(),
+            )
+        response.raise_for_status()
+        with open(output_path, "wb") as f:
+            f.write(response.content)
+        return output_path
         raise NotImplementedError("TODO(Layer a): 实现 PptBeautifyClient.beautify_file")
 
 
