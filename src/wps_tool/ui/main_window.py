@@ -177,17 +177,46 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("请先在表格里选中要处理的行。")
             return
         action = self.action_combo.currentText()
-        out_dir = self.output_edit.text().strip()
+        raw_out = self.output_edit.text().strip()
         submitted = 0
         for row in sorted(rows):
             job_id = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
             file_path = self.table.path_for(job_id)
             if not file_path:
                 continue
-            options = {} if action == "extract_text" else {"output_dir": out_dir}
+            options = self._build_options(action, file_path, raw_out)
             self._submit_job(job_id, file_path, action, options)
             submitted += 1
         self.statusBar().showMessage(f"已提交 {submitted} 个任务。")
+
+    def _build_options(self, action: str, file_path: str, raw_out: str) -> dict:
+        """按动作构造 ``processor.run`` 需要的 options。
+
+        之前所有非 extract_text 动作都只传 ``{"output_dir": out_dir}``，导致：
+          - rotate 要 ``output`` 却拿到 ``output_dir`` → ``KeyError('output')``；
+          - split / to_images 在「输出目录」留空时把文件写到根 ``/page_1.*``
+            （read-only → ``OSError 30`` / ``fzerror``）。
+        现在：输出目录留空 → 回退到源文件旁 ``processed/``（与占位提示一致）并
+        ``mkdir``；按动作给齐 ``output`` / ``output_dir`` / ``inputs`` 等键。
+        """
+        if action == "extract_text":
+            return {}
+        out_dir = raw_out or str(Path(file_path).parent / "processed")
+        Path(out_dir).mkdir(parents=True, exist_ok=True)
+        stem = Path(file_path).stem
+        suffix = Path(file_path).suffix
+        if action in ("split", "to_images"):
+            return {"output_dir": out_dir}
+        if action == "rotate":
+            return {"output": str(Path(out_dir) / f"{stem}_rotated.pdf")}
+        if action == "to_pdf":  # 图片：多图合 PDF
+            return {"inputs": [file_path], "output": str(Path(out_dir) / f"{stem}.pdf")}
+        if action == "compress":
+            return {"output": str(Path(out_dir) / f"{stem}_compressed{suffix}")}
+        if action == "extract_pages":
+            # UI 暂无页码输入，默认取第 1 页（0-based）做演示。
+            return {"pages": [0], "output": str(Path(out_dir) / f"{stem}_pages.pdf")}
+        return {"output_dir": out_dir}
 
     def _on_merge_selected(self) -> None:
         rows = sorted({i.row() for i in self.table.selectedIndexes()})
