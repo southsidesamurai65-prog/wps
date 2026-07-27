@@ -45,6 +45,94 @@
 
 ---
 
+## PPT 美化（外部 API）使用方法
+
+把一个 `.pptx` 的**文本大纲**（每页页型 + 文本）发给外部美化 API，拿回美化建议 JSON，写到源文件旁 `processed/`。**隐私优先**：默认只上传大纲文本，不上传 pptx 文件本身。
+
+### 两种调用模式
+
+`PptBeautifyClient`（`services/ppt_beautify_api.py`）有两个方法，都是 Layer (a) 服务 TODO，学生实现：
+
+| 方法 | 上传内容 | 请求体 | 用途 |
+|---|---|---|---|
+| `beautify_by_outline(slides, style, language)` | JSON 大纲 | JSON，**不含** pptx zip 头 `PK\x03\x04` | UI「美化选中 PPT」按钮用这个 |
+| `beautify_file(input_path, output_path, style)` | 完整 pptx | multipart，含 `PK\x03\x04` | 能力更强，但把文件传出去了 |
+
+UI 按钮走 outline 模式（隐私优先）；要上传完整文件请直接调 `beautify_file`（见下「程序化使用」）。
+
+### 配置（`.env`）
+
+默认关闭。启用：
+
+```ini
+ENABLE_API_UPLOAD=true
+PPT_BEAUTIFY_BASE_URL=https://api.example.com
+PPT_BEAUTIFY_API_KEY=你的密钥
+```
+
+- `ENABLE_API_UPLOAD=false`（默认）→ `app.py::build_beautify_client(settings)` 返回 `None`，不构造客户端、不注入 MainWindow；此时点「美化」只提示「未配置」，**不发任何网络请求**。
+- 仅当 `enable_api_upload=true` **且** `api_configured()`（url + key 都非空）时才构造 `PptBeautifyClient` 并注入。
+
+可选的本地辅助 LLM（与美化外部 API 相互独立，供后续本地增强能力用）：
+
+```ini
+LLM_PROVIDER=gemini   # gemini | claude | openai
+LLM_API_KEY=
+```
+
+### UI 操作步骤
+
+1. 启动 `./wps/bin/python -m wps_tool`，拖一个 `.pptx` 进窗口（或「打开文件…」）。
+2. 在文件表里**选中一行 `.pptx`**（一次只美化一个；选中多行或非 `.pptx` 会提示）。
+3. 点参数区「**美化选中 PPT**」按钮。
+4. 后台执行：走 `Registry → PptxProcessor` 提取每页文本（`extract_text`）+ 结构（`analyze_structure`）→ 合成大纲 → 调 `client.beautify_by_outline(slides)`。
+5. 返回的建议 JSON 写到「输出目录」（留空则源文件旁 `processed/`）下 `<文件名>_beautify_outline.json`。
+6. 进度/成败在状态栏与进度区显示；失败（含服务 TODO 未实现时）经 runner 的 `failed` 信号提示，UI 不崩。
+
+### 上传的大纲长什么样
+
+`beautify_by_outline` 收到的 `slides` 是 `list[dict]`，每页一项：
+
+```json
+[
+  {"slide": 1, "page_type": "title",   "texts": ["季度汇报"]},
+  {"slide": 2, "page_type": "content", "texts": ["要点一", "要点二"]}
+]
+```
+
+`page_type` 来自 `analyze_pptx_structure`（`title` / `section` / `content`，按 `slide_layout.name` 判），`texts` 来自 `extract_pptx_text`（每页各文本框文本）。
+
+### 隐私保证
+
+- outline 模式请求体是 JSON，**不含** pptx 的 zip 头字节 `PK\x03\x04`——`tests/test_ppt_beautify_api.py` 把这条隐私要求写成可执行断言（仅大纲模式不含，完整文件模式必含）。
+- 默认关闭（`ENABLE_API_UPLOAD=false`），所有功能本地处理。
+- API Key 只存本地 `.env`（`.gitignore` 已忽略 `.env`）。
+
+### 程序化使用（不走 UI）
+
+```python
+from wps_tool.services.ppt_beautify_api import PptBeautifyClient
+
+client = PptBeautifyClient(base_url="https://api.example.com", api_key="...")
+# 只上传大纲（隐私优先）
+suggestions = client.beautify_by_outline(
+    [{"slide": 1, "page_type": "title", "texts": ["标题"]}],
+    style="business",
+    language="zh-CN",
+)
+# 或上传完整文件，下载美化后的 pptx
+client.beautify_file("in.pptx", "out.pptx", style="business")
+client.close()
+```
+
+测试用 `httpx.MockTransport` 离线注入 transport，在 handler 里断言请求体隐私——**不联网也能跑**。
+
+### 注意：服务方法目前是 TODO
+
+`beautify_file` / `beautify_by_outline` 是 Layer (a) 服务 TODO（`raise NotImplementedError`）。**接线已就位**（`app.py` 装配 + UI 按钮 + settings 字段 + `.env.example`），但方法体要学生实现。实现前点「美化」会经 runner 的 `failed` 信号显示 `NotImplementedError`——这是 spec 看板，不是 bug。
+
+---
+
 ## 教学设计：三层 TODO
 
 核心逻辑分三层留 TODO，推荐实现顺序 **a → b → c**。
