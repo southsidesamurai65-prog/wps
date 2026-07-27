@@ -63,7 +63,15 @@ def extract_pptx_images(input_path: str, output_dir: str) -> list[str]:
     提示：from pptx.enum.shapes import MSO_SHAPE_TYPE；
       n 可用 enumerate 从 1 计；ext 形如 "png"/"jpeg"。
     """
-    raise NotImplementedError("TODO(Layer a): 实现 extract_pptx_images")
+    prs=Presentation(input_path)
+    rst=[]
+    for i, slide in enumerate(prs.slides, start=1):
+        for j, shape in enumerate(slide.shapes, start=1):
+            if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                with open(f"{output_dir}/image_{i}_{j}.{shape.image.ext}", "wb") as f:
+                    f.write(shape.image.blob)
+                rst.append(f"{output_dir}/image_{i}_{j}.{shape.image.ext}")
+    return rst
 
 
 def analyze_pptx_structure(input_path: str) -> list[dict]:
@@ -81,7 +89,18 @@ def analyze_pptx_structure(input_path: str) -> list[dict]:
       - 用 layout_name 的字符串包含判定 page_type（见契约）。
       - 测试夹具用默认模板：slide1 是 "Title Slide"，slide2 是 "Title and Content"。
     """
-    raise NotImplementedError("TODO(Layer a): 实现 analyze_pptx_structure")
+    prs = Presentation(input_path)
+    rst = []
+    for i, slide in enumerate(prs.slides, start=1):
+        layout_name = slide.slide_layout.name
+        if "Title Slide" in layout_name:
+            page_type = "title"
+        elif "Section Header" in layout_name:
+            page_type = "section"
+        else:
+            page_type = "content"
+        rst.append({"slide": i, "layout": layout_name, "page_type": page_type})
+    return rst
 
 
 def replace_pptx_tokens(input_path: str, output_path: str, mapping: dict[str, str]) -> str:
@@ -95,7 +114,16 @@ def replace_pptx_tokens(input_path: str, output_path: str, mapping: dict[str, st
 
     提示：和 docx 的 replace 同理，逐 run 替换。
     """
-    raise NotImplementedError("TODO(Layer a): 实现 replace_pptx_tokens")
+    prs = Presentation(input_path)
+    for i, slide in enumerate(prs.slides, start=1):
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                for paragraph in shape.text_frame.paragraphs:
+                    for run in paragraph.runs:
+                        for old, new in mapping.items():
+                            run.text = run.text.replace(old, new)
+    prs.save(output_path)
+    return output_path
 
 
 class PptxProcessor(FileProcessor):
