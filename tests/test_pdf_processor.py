@@ -36,6 +36,10 @@ def test_split_pdf(sample_pdf_multipage, tmp_output_dir):
     paths = split_pdf(str(sample_pdf_multipage), str(tmp_output_dir))
     assert len(paths) == 3
     assert all(Path(p).name == f"page_{i}.pdf" for i, p in enumerate(paths, start=1))
+    # 每个拆分文件应恰好 1 页——抓「共用 writer 导致页累积」的错
+    # （错的实现会让 page_2 含 2 页、page_3 含 3 页，但文件名/数量仍对）。
+    for p in paths:
+        assert len(PdfReader(p).pages) == 1, f"{p} 应只有 1 页"
 
 
 def test_rotate_pdf(sample_pdf_multipage, tmp_output_dir):
