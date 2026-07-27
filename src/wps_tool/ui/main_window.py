@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -43,11 +44,20 @@ from wps_tool.ui.widgets import DropArea, FileTable, build_job_func
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, registry, runner, settings: Settings) -> None:
+    def __init__(
+        self,
+        registry,
+        runner,
+        settings: Settings,
+        beautify_client=None,
+    ) -> None:
         super().__init__()
         self.registry = registry
         self.runner = runner
         self.settings = settings
+        # PPT 美化外部 API 客户端（由 app.py 依配置注入；未启用时为 None）。
+        # 为 None 时「美化」按钮只提示未配置，不触发任何网络请求。
+        self.beautify_client = beautify_client
         self.setWindowTitle("WPS 工具 — 本地 Office/PDF 处理")
         self.resize(960, 640)
 
@@ -113,6 +123,9 @@ class MainWindow(QMainWindow):
         self.merge_btn = QPushButton("合并选中 PDF")
         self.merge_btn.clicked.connect(self._on_merge_selected)
         row.addWidget(self.merge_btn)
+        self.beautify_btn = QPushButton("美化选中 PPT")
+        self.beautify_btn.clicked.connect(self._on_beautify_selected)
+        row.addWidget(self.beautify_btn)
         return box
 
     def _build_progress(self) -> QWidget:
@@ -201,6 +214,73 @@ class MainWindow(QMainWindow):
         self.runner.submit(job_id, job)
         self.statusBar().showMessage(f"已提交合并任务 {job_id}。")
 
+    def _on_beautify_selected(self) -> None:
+        """美化选中的 PPT：只上传文本大纲（隐私优先），拿回美化建议。
+
+        走 Registry → PptxProcessor 提取每页文本与结构（与「处理选中行」同一路径），
+        合成大纲后调 ``beautify_client.beautify_by_outline(slides)``，把返回的
+        建议 JSON 写到源文件旁 processed/。Layer (a) 服务未实现时由 Runner 转
+        failed 信号提示——UI 不崩。
+        """
+        if self.beautify_client is None:
+            self.statusBar().showMessage(
+                "美化 API 未配置：在 .env 设 ENABLE_API_UPLOAD=true 并填写"
+                " PPT_BEAUTIFY_BASE_URL / PPT_BEAUTIFY_API_KEY 后重启。"
+            )
+            return
+        rows = sorted({i.row() for i in self.table.selectedIndexes()})
+        if not rows:
+            self.statusBar().showMessage("请先在表格里选中一个 .pptx 文件。")
+            return
+        if len(rows) != 1:
+            self.statusBar().showMessage("美化一次只处理一个 .pptx，请只选中一行。")
+            return
+        job_id = self.table.item(rows[0], 0).data(Qt.ItemDataRole.UserRole)
+        file_path = self.table.path_for(job_id)
+        if not file_path or Path(file_path).suffix.lower() != ".pptx":
+            self.statusBar().showMessage("选中的文件不是 .pptx，无法美化。")
+            return
+
+        import json
+        import uuid
+
+        client = self.beautify_client
+        registry = self.registry
+        out_dir = self.output_edit.text().strip() or str(
+            Path(file_path).parent / "processed"
+        )
+
+        def job(progress):
+            progress(0.0, "提取 PPT 大纲")
+            processor = registry.get_processor(file_path)
+            texts = processor.run(file_path, "extract_text", {})
+            struct = processor.run(file_path, "analyze_structure", {})
+            # 合成大纲：每页 page_type + 文本，不上传 pptx 字节
+            slides = [
+                {
+                    "slide": t.get("slide"),
+                    "page_type": s.get("page_type"),
+                    "texts": t.get("texts", []),
+                }
+                for t, s in zip(texts, struct)
+            ]
+            progress(0.5, "调用美化 API（仅上传大纲，隐私优先）")
+            result = client.beautify_by_outline(slides)
+            progress(0.9, "写入美化建议")
+            Path(out_dir).mkdir(parents=True, exist_ok=True)
+            out_json = str(
+                Path(out_dir) / f"{Path(file_path).stem}_beautify_outline.json"
+            )
+            Path(out_json).write_text(
+                json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            progress(1.0, "美化建议已返回")
+            return out_json
+
+        new_job_id = uuid.uuid4().hex[:8]
+        self.runner.submit(new_job_id, job)
+        self.statusBar().showMessage(f"已提交美化任务 {new_job_id}。")
+
     def _submit_job(self, job_id: str, file_path: str, action: str, options: dict) -> None:
         job = build_job_func(self.registry, file_path, action, options)
         self.runner.submit(job_id, job)
@@ -227,6 +307,10 @@ class MainWindow(QMainWindow):
         except NotImplementedError:
             # SyncTaskRunner 已写好不会抛；学生 TaskRunner 未实现 shutdown 时跳过。
             pass
+        if self.beautify_client is not None:
+            with contextlib.suppress(Exception):
+                # 关窗时关掉 httpx 连接池；即使学生注入的假实现抛错也不阻塞关闭。
+                self.beautify_client.close()
         super().closeEvent(event)
 
 

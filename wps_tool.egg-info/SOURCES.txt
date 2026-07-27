@@ -1,7 +1,0 @@
-README.md
-pyproject.toml
-wps_tool.egg-info/PKG-INFO
-wps_tool.egg-info/SOURCES.txt
-wps_tool.egg-info/dependency_links.txt
-wps_tool.egg-info/requires.txt
-wps_tool.egg-info/top_level.txt
