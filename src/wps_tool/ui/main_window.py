@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QStatusBar,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -59,7 +60,7 @@ class MainWindow(QMainWindow):
         # 为 None 时「美化」按钮只提示未配置，不触发任何网络请求。
         self.beautify_client = beautify_client
         self.setWindowTitle("WPS 工具 — 本地 Office/PDF 处理")
-        self.resize(960, 640)
+        self.resize(960, 760)
 
         self._build_toolbar()
         self._build_central()
@@ -98,34 +99,75 @@ class MainWindow(QMainWindow):
 
         right.addWidget(self._build_params())
         right.addWidget(self._build_progress())
+        right.addWidget(self._build_result(), stretch=1)
         root.addLayout(right, stretch=1)
 
         self.setCentralWidget(central)
 
     def _build_params(self) -> QWidget:
         box = QWidget()
-        row = QHBoxLayout(box)
-        row.addWidget(QLabel("操作:"))
+        outer = QVBoxLayout(box)
+        outer.setContentsMargins(0, 4, 0, 4)
+        outer.setSpacing(4)
+
+        # 第一行：操作 / 输出目录 / 替换映射
+        row1 = QHBoxLayout()
+        row1.addWidget(QLabel("操作:"))
         self.action_combo = QComboBox()
         self.action_combo.addItems(
-            ["extract_text", "to_images", "split", "rotate", "to_pdf", "compress"]
+            [
+                "extract_text",
+                "analyze_structure",
+                "extract_images",
+                "replace",
+                "replace_tokens",
+                "split",
+                "rotate",
+                "to_images",
+                "to_pdf",
+                "compress",
+            ]
         )
-        row.addWidget(self.action_combo)
-        row.addSpacing(12)
-        row.addWidget(QLabel("输出目录:"))
+        row1.addWidget(self.action_combo)
+        row1.addSpacing(12)
+        row1.addWidget(QLabel("输出目录:"))
         self.output_edit = QLineEdit(self.settings.default_output_dir or "")
         self.output_edit.setPlaceholderText("留空 = 源文件旁 processed/")
-        row.addWidget(self.output_edit, stretch=1)
+        row1.addWidget(self.output_edit, stretch=1)
+        row1.addSpacing(12)
+        row1.addWidget(QLabel("替换映射:"))
+        self.replace_edit = QLineEdit()
+        self.replace_edit.setPlaceholderText("旧文本=新文本（多个用 ; 分隔，仅 replace/replace_tokens 用）")
+        row1.addWidget(self.replace_edit, stretch=1)
+        outer.addLayout(row1)
+
+        # 第二行：动作按钮
+        row2 = QHBoxLayout()
         self.run_btn = QPushButton("处理选中行")
         self.run_btn.setDefault(True)
         self.run_btn.clicked.connect(self._on_run_selected)
-        row.addWidget(self.run_btn)
+        row2.addWidget(self.run_btn)
         self.merge_btn = QPushButton("合并选中 PDF")
         self.merge_btn.clicked.connect(self._on_merge_selected)
-        row.addWidget(self.merge_btn)
+        row2.addWidget(self.merge_btn)
         self.beautify_btn = QPushButton("美化选中 PPT")
         self.beautify_btn.clicked.connect(self._on_beautify_selected)
-        row.addWidget(self.beautify_btn)
+        row2.addWidget(self.beautify_btn)
+        row2.addStretch(1)
+        outer.addLayout(row2)
+        return box
+
+    def _build_result(self) -> QWidget:
+        """结果查看区：extract_text / analyze_structure 等返回的内容显示在这里。"""
+        box = QWidget()
+        lay = QVBoxLayout(box)
+        lay.setContentsMargins(0, 4, 0, 4)
+        lay.setSpacing(2)
+        lay.addWidget(QLabel("结果（extract_text / analyze_structure / 路径等）"))
+        self.result_view = QTextEdit()
+        self.result_view.setReadOnly(True)
+        self.result_view.setPlaceholderText("处理完成后，结果会显示在这里。")
+        lay.addWidget(self.result_view)
         return box
 
     def _build_progress(self) -> QWidget:
@@ -170,6 +212,7 @@ class MainWindow(QMainWindow):
         self.table.setRowCount(0)
         self.progress_bar.setValue(0)
         self.progress_label.setText("等待任务")
+        self.result_view.clear()
 
     def _on_run_selected(self) -> None:
         rows = {i.row() for i in self.table.selectedIndexes()}
@@ -178,6 +221,13 @@ class MainWindow(QMainWindow):
             return
         action = self.action_combo.currentText()
         raw_out = self.output_edit.text().strip()
+        if action in ("replace", "replace_tokens") and not self._parse_mapping(
+            self.replace_edit.text()
+        ):
+            self.statusBar().showMessage(
+                "请在「替换映射」里填 旧文本=新文本（多个用 ; 分隔）后再处理。"
+            )
+            return
         submitted = 0
         for row in sorted(rows):
             job_id = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
@@ -199,13 +249,13 @@ class MainWindow(QMainWindow):
         现在：输出目录留空 → 回退到源文件旁 ``processed/``（与占位提示一致）并
         ``mkdir``；按动作给齐 ``output`` / ``output_dir`` / ``inputs`` 等键。
         """
-        if action == "extract_text":
+        if action in ("extract_text", "analyze_structure"):
             return {}
         out_dir = raw_out or str(Path(file_path).parent / "processed")
         Path(out_dir).mkdir(parents=True, exist_ok=True)
         stem = Path(file_path).stem
         suffix = Path(file_path).suffix
-        if action in ("split", "to_images"):
+        if action in ("split", "to_images", "extract_images"):
             return {"output_dir": out_dir}
         if action == "rotate":
             return {"output": str(Path(out_dir) / f"{stem}_rotated.pdf")}
@@ -213,10 +263,32 @@ class MainWindow(QMainWindow):
             return {"inputs": [file_path], "output": str(Path(out_dir) / f"{stem}.pdf")}
         if action == "compress":
             return {"output": str(Path(out_dir) / f"{stem}_compressed{suffix}")}
+        if action in ("replace", "replace_tokens"):
+            return {
+                "output": str(Path(out_dir) / f"{stem}_replaced{suffix}"),
+                "mapping": self._parse_mapping(self.replace_edit.text()),
+            }
         if action == "extract_pages":
             # UI 暂无页码输入，默认取第 1 页（0-based）做演示。
             return {"pages": [0], "output": str(Path(out_dir) / f"{stem}_pages.pdf")}
         return {"output_dir": out_dir}
+
+    def _parse_mapping(self, text: str) -> dict[str, str]:
+        """解析「旧文本=新文本」对，多个用 ``;`` 分隔。
+
+        例：``{{COMPANY}}=Acme; T1=标题一`` → ``{"{{COMPANY}}": "Acme", "T1": "标题一"}``。
+        空 / 无 ``=`` 的段跳过；旧文本为空也跳过。
+        """
+        mapping: dict[str, str] = {}
+        for part in text.split(";"):
+            part = part.strip()
+            if not part or "=" not in part:
+                continue
+            old, new = part.split("=", 1)
+            old, new = old.strip(), new.strip()
+            if old:
+                mapping[old] = new
+        return mapping
 
     def _on_merge_selected(self) -> None:
         rows = sorted({i.row() for i in self.table.selectedIndexes()})
@@ -324,7 +396,28 @@ class MainWindow(QMainWindow):
 
     def _on_finished(self, job_id: str, result) -> None:
         self.table.set_status(job_id, "成功")
+        self._show_result(result)
         self.statusBar().showMessage(f"{job_id} 完成。")
+
+    def _show_result(self, result) -> None:
+        """把 job 结果显示在结果区。
+
+        - ``str``（PDF/DOCX 的 extract_text、或 rotate/merge 的输出路径）直接显示；
+        - ``list`` / ``dict``（PPTX extract_text、analyze_structure、路径列表等）
+          走 JSON 美化；
+        - 其它 ``repr``。
+        """
+        import json
+
+        if result is None:
+            text = ""
+        elif isinstance(result, str):
+            text = result
+        elif isinstance(result, (list, dict)):
+            text = json.dumps(result, ensure_ascii=False, indent=2)
+        else:
+            text = repr(result)
+        self.result_view.setPlainText(text)
 
     def _on_failed(self, job_id: str, msg: str) -> None:
         self.table.set_status(job_id, f"失败: {msg[:40]}")
