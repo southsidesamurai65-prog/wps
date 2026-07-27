@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 
@@ -31,10 +32,13 @@ def _privacy_filter(record: dict) -> bool:
     return True
 
 
-def setup_logging(level: str = "INFO") -> logger:
+def setup_logging(level: str | None = None) -> logger:
     """配置 loguru：移除默认 handler、加带脱敏的 stderr handler。"""
+    effective_level = (
+        level or os.getenv("WPS_LOG_LEVEL") or os.getenv("LOG_LEVEL") or "INFO"
+    ).upper()
     logger.remove()
-    logger.add(sys.stderr, level=level, filter=_privacy_filter)
+    logger.add(sys.stderr, level=effective_level, filter=_privacy_filter)
     return logger
 
 

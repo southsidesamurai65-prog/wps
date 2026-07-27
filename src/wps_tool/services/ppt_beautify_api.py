@@ -16,6 +16,7 @@ zip 头 ``PK\\x03\\x04``，见 ``tests/test_ppt_beautify_api.py``）。
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -26,6 +27,7 @@ from wps_tool.processors.ppt_processor import (
     extract_pptx_text,
 )
 from wps_tool.services.ppt_renderer import render_beautified_deck
+from wps_tool.utils.logging import logger
 
 #: pptx 文件的 zip 头字节（PK\\x03\\x04）。隐私断言用：LLM 请求体**不应**含它。
 PPTX_MAGIC = b"PK\x03\x04"
@@ -90,6 +92,13 @@ class PptBeautifyClient:
             transport=transport,
             timeout=timeout,
         )
+        logger.debug(
+            "PPT 美化客户端初始化: provider={} model={} base_url={} timeout={}",
+            self.provider,
+            self.model,
+            str(self._client.base_url).rstrip("/"),
+            timeout,
+        )
 
     @property
     def client(self) -> httpx.Client:
@@ -112,17 +121,60 @@ class PptBeautifyClient:
             ],
             "response_format": {"type": "json_object"},
         }
-        response = self._client.post(
+        logger.info(
+            "PPT 美化 LLM 请求准备: method=POST base_url={} endpoint={} model={} prompt_chars={}",
+            str(self._client.base_url).rstrip("/"),
             _CHAT_COMPLETIONS_PATH,
-            json=body,
-            headers=self._auth_headers(),
+            self.model,
+            len(user_prompt),
         )
-        response.raise_for_status()
-        data = response.json()
-        content = data["choices"][0]["message"]["content"]
-        spec = json.loads(content)
+        try:
+            response = self._client.post(
+                _CHAT_COMPLETIONS_PATH,
+                json=body,
+                headers=self._auth_headers(),
+            )
+        except httpx.HTTPError:
+            logger.exception(
+                "PPT 美化 LLM 请求失败: endpoint={}", _CHAT_COMPLETIONS_PATH
+            )
+            raise
+        logger.info(
+            "PPT 美化 LLM 收到响应: status_code={} content_type={}",
+            response.status_code,
+            response.headers.get("content-type", ""),
+        )
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError:
+            logger.error(
+                "PPT 美化 LLM HTTP 错误: status_code={} body_preview={}",
+                response.status_code,
+                response.text[:500],
+            )
+            raise
+        try:
+            data = response.json()
+            content = data["choices"][0]["message"]["content"]
+            spec = json.loads(content)
+        except (KeyError, IndexError, TypeError, json.JSONDecodeError):
+            logger.exception(
+                "PPT 美化 LLM 响应解析失败: status_code={} body_chars={}",
+                response.status_code,
+                len(response.text),
+            )
+            raise
         if not isinstance(spec, dict) or "slides" not in spec:
+            logger.error(
+                "PPT 美化 LLM spec 不合法: spec_type={} has_slides={}",
+                type(spec).__name__,
+                isinstance(spec, dict) and "slides" in spec,
+            )
             raise ApiUnavailableError(f"LLM 返回的 spec 不合法：{content!r}")
+        logger.info(
+            "PPT 美化 LLM spec 解析完成: slides={}",
+            len(spec.get("slides", [])),
+        )
         return spec
 
     def beautify_file(
@@ -140,17 +192,42 @@ class PptBeautifyClient:
           - 请求体**不含** pptx 二进制（隐私：只发文本）。
         """
         if not self.api_key:
+            logger.error("PPT 美化中止: api_key 为空")
             raise ApiUnavailableError("api_key 不能为空")
+        logger.info(
+            "PPT 美化开始: input_name={} output={} style={}",
+            Path(input_path).name,
+            output_path,
+            style,
+        )
         texts = extract_pptx_text(input_path)
         structure = analyze_pptx_structure(input_path)
+        logger.info(
+            "PPT 美化本地解析完成: input_name={} text_pages={} structure_pages={}",
+            Path(input_path).name,
+            len(texts),
+            len(structure),
+        )
         user_prompt = _build_user_prompt(texts, structure, style)
+        logger.debug("PPT 美化 prompt 构建完成: prompt_chars={}", len(user_prompt))
         spec = self._call_llm(user_prompt)
         # spec 页数应 == 源页数；缺失或对不齐时，按源页数补齐/截断，保证产物可打开。
         src_pages = len(texts)
         slides = spec.get("slides", [])
         if len(slides) != src_pages:
+            logger.warning(
+                "PPT 美化 spec 页数不匹配: src_pages={} spec_pages={} 将自动对齐",
+                src_pages,
+                len(slides),
+            )
             spec = {**spec, "slides": _align_pages(slides, src_pages, texts)}
-        return render_beautified_deck(spec, output_path, style)
+        result = render_beautified_deck(spec, output_path, style)
+        logger.info(
+            "PPT 美化本地渲染完成: output={} slides={}",
+            result,
+            len(spec.get("slides", [])),
+        )
+        return result
 
 
 def _align_pages(

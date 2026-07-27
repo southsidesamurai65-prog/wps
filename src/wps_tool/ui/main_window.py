@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
 
 from wps_tool.models.settings import Settings
 from wps_tool.ui.widgets import DropArea, FileTable, build_job_func
+from wps_tool.utils.logging import logger
 
 
 class MainWindow(QMainWindow):
@@ -383,7 +384,12 @@ class MainWindow(QMainWindow):
         只把每页文本发给 LLM，再用 python-pptx 本地重建一套干净 deck，写到
         ``processed/<文件名>_beautified.pptx``。服务方法未就绪时由 Runner 转 failed 信号提示——UI 不崩。
         """
+        logger.info(
+            "PPT 美化按钮点击: beautify_client_ready={}",
+            self.beautify_client is not None,
+        )
         if self.beautify_client is None:
+            logger.warning("PPT 美化未提交: beautify_client=None")
             self.statusBar().showMessage(
                 "美化 LLM 未配置：在 .env 设 ENABLE_API_UPLOAD=true 并填写"
                 " LLM_PROVIDER=openai / LLM_API_KEY（可选 LLM_MODEL）后重启。"
@@ -391,14 +397,20 @@ class MainWindow(QMainWindow):
             return
         rows = sorted({i.row() for i in self.table.selectedIndexes()})
         if not rows:
+            logger.warning("PPT 美化未提交: 未选中文件")
             self.statusBar().showMessage("请先在表格里选中一个 .pptx 文件。")
             return
         if len(rows) != 1:
+            logger.warning("PPT 美化未提交: 选中行数={}", len(rows))
             self.statusBar().showMessage("美化一次只处理一个 .pptx，请只选中一行。")
             return
         job_id = self.table.item(rows[0], 0).data(Qt.ItemDataRole.UserRole)
         file_path = self.table.path_for(job_id)
         if not file_path or Path(file_path).suffix.lower() != ".pptx":
+            logger.warning(
+                "PPT 美化未提交: 文件类型不支持 suffix={}",
+                Path(file_path).suffix.lower() if file_path else "",
+            )
             self.statusBar().showMessage("选中的文件不是 .pptx，无法美化。")
             return
 
@@ -411,13 +423,35 @@ class MainWindow(QMainWindow):
         output = str(Path(out_dir) / f"{Path(file_path).stem}_beautified.pptx")
 
         def job(progress):
+            logger.info(
+                "PPT 美化任务开始: job_id={} input_name={} output={}",
+                new_job_id,
+                Path(file_path).name,
+                output,
+            )
             progress(0.0, "美化 PPT（本地解析 → LLM → 本地渲染）")
             Path(out_dir).mkdir(parents=True, exist_ok=True)
-            result = client.beautify_file(file_path, output, style="business")
-            progress(1.0, "美化完成")
-            return result
+            try:
+                result = client.beautify_file(file_path, output, style="business")
+            except Exception:
+                logger.exception("PPT 美化任务失败: job_id={}", new_job_id)
+                raise
+            else:
+                logger.info(
+                    "PPT 美化任务完成: job_id={} output={}",
+                    new_job_id,
+                    result,
+                )
+                progress(1.0, "美化完成")
+                return result
 
         new_job_id = uuid.uuid4().hex[:8]
+        logger.info(
+            "PPT 美化任务提交: job_id={} input_name={} output={}",
+            new_job_id,
+            Path(file_path).name,
+            output,
+        )
         self.runner.submit(new_job_id, job)
         self.statusBar().showMessage(f"已提交美化任务 {new_job_id}。")
 
@@ -459,6 +493,7 @@ class MainWindow(QMainWindow):
         self.result_view.setPlainText(text)
 
     def _on_failed(self, job_id: str, msg: str) -> None:
+        logger.error("任务失败信号: job_id={} msg={}", job_id, msg)
         self.table.set_status(job_id, f"失败: {msg[:40]}")
         self.statusBar().showMessage(f"{job_id} 失败：{msg}")
 

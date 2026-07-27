@@ -16,6 +16,7 @@ import sys
 
 from PySide6.QtWidgets import QApplication
 
+from wps_tool.core.errors import ApiUnavailableError
 from wps_tool.core.registry import ProcessorRegistry
 from wps_tool.core.runner_iface import Runner, SyncTaskRunner
 from wps_tool.models.settings import Settings
@@ -23,7 +24,7 @@ from wps_tool.processors import register_default_processors
 from wps_tool.services.ppt_beautify_api import PptBeautifyClient
 from wps_tool.ui.main_window import MainWindow
 from wps_tool.ui.theme import apply_theme
-from wps_tool.utils.logging import setup_logging
+from wps_tool.utils.logging import logger, setup_logging
 
 
 def build_runner(settings: Settings) -> Runner:
@@ -33,6 +34,10 @@ def build_runner(settings: Settings) -> Runner:
         from wps_tool.core.task import TaskRunner
         return TaskRunner(max_workers=settings.task_max_workers)
     """
+    logger.info(
+        "构造任务执行器: runner=SyncTaskRunner max_workers={}",
+        1,
+    )
     return SyncTaskRunner(max_workers=1)
 
 
@@ -45,15 +50,38 @@ def build_beautify_client(settings: Settings) -> PptBeautifyClient | None:
     时才构造客户端，否则返回 None——MainWindow 的「美化」按钮会提示未配置，不触发任何网络请求。
     """
     if not settings.enable_api_upload:
+        logger.warning(
+            "PPT 美化客户端未创建: ENABLE_API_UPLOAD=false, 不会发起 API 请求"
+        )
         return None
     if not settings.llm_configured():
+        logger.warning(
+            "PPT 美化客户端未创建: LLM 配置不完整 provider_set={} api_key_set={}",
+            bool(settings.llm_provider),
+            bool(settings.llm_api_key),
+        )
         return None
-    return PptBeautifyClient(
-        api_key=settings.llm_api_key,
-        model=settings.llm_model,
-        provider=settings.llm_provider,
-        base_url=settings.llm_base_url,
+    logger.info(
+        "PPT 美化客户端准备创建: provider={} model={} base_url={}",
+        settings.llm_provider,
+        settings.llm_model,
+        settings.llm_base_url,
     )
+    try:
+        return PptBeautifyClient(
+            api_key=settings.llm_api_key,
+            model=settings.llm_model,
+            provider=settings.llm_provider,
+            base_url=settings.llm_base_url,
+        )
+    except ApiUnavailableError:
+        logger.exception(
+            "PPT 美化客户端创建失败: provider={} model={} base_url={}",
+            settings.llm_provider,
+            settings.llm_model,
+            settings.llm_base_url,
+        )
+        return None
 
 
 def main() -> int:
@@ -62,6 +90,14 @@ def main() -> int:
     apply_theme(app)
 
     settings = Settings()
+    logger.info(
+        "应用配置加载: enable_api_upload={} llm_provider={} llm_model={} llm_base_url={} api_key_set={}",
+        settings.enable_api_upload,
+        settings.llm_provider,
+        settings.llm_model,
+        settings.llm_base_url,
+        bool(settings.llm_api_key),
+    )
     registry = ProcessorRegistry()
     register_default_processors(registry)
     runner = build_runner(settings)
