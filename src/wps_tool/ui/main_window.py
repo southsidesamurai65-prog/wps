@@ -27,6 +27,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
+    QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -34,6 +35,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QProgressBar,
     QPushButton,
+    QSpinBox,
     QStatusBar,
     QTextEdit,
     QVBoxLayout,
@@ -123,6 +125,7 @@ class MainWindow(QMainWindow):
                 "replace_tokens",
                 "split",
                 "rotate",
+                "extract_pages",
                 "to_images",
                 "to_pdf",
                 "compress",
@@ -141,20 +144,50 @@ class MainWindow(QMainWindow):
         row1.addWidget(self.replace_edit, stretch=1)
         outer.addLayout(row1)
 
-        # 第二行：动作按钮
+        # 第二行：动作参数（按选用动作生效；不用到就忽略）
         row2 = QHBoxLayout()
+        row2.addWidget(QLabel("角度:"))
+        self.angle_combo = QComboBox()
+        self.angle_combo.addItems(["90", "180", "270"])
+        row2.addWidget(self.angle_combo)
+        row2.addSpacing(12)
+        row2.addWidget(QLabel("质量:"))
+        self.quality_spin = QSpinBox()
+        self.quality_spin.setRange(1, 95)
+        self.quality_spin.setValue(85)
+        self.quality_spin.setSuffix(" %")
+        row2.addWidget(self.quality_spin)
+        row2.addSpacing(12)
+        row2.addWidget(QLabel("倍率:"))
+        self.zoom_spin = QDoubleSpinBox()
+        self.zoom_spin.setRange(0.5, 5.0)
+        self.zoom_spin.setSingleStep(0.5)
+        self.zoom_spin.setValue(2.0)
+        self.zoom_spin.setSuffix(" ×")
+        row2.addWidget(self.zoom_spin)
+        row2.addSpacing(12)
+        row2.addWidget(QLabel("页码:"))
+        self.pages_edit = QLineEdit()
+        self.pages_edit.setPlaceholderText(
+            "0,2（0-based，逗号分隔；留空=第1页，仅 extract_pages）"
+        )
+        row2.addWidget(self.pages_edit, stretch=1)
+        outer.addLayout(row2)
+
+        # 第三行：动作按钮
+        row3 = QHBoxLayout()
         self.run_btn = QPushButton("处理选中行")
         self.run_btn.setDefault(True)
         self.run_btn.clicked.connect(self._on_run_selected)
-        row2.addWidget(self.run_btn)
+        row3.addWidget(self.run_btn)
         self.merge_btn = QPushButton("合并选中 PDF")
         self.merge_btn.clicked.connect(self._on_merge_selected)
-        row2.addWidget(self.merge_btn)
+        row3.addWidget(self.merge_btn)
         self.beautify_btn = QPushButton("美化选中 PPT")
         self.beautify_btn.clicked.connect(self._on_beautify_selected)
-        row2.addWidget(self.beautify_btn)
-        row2.addStretch(1)
-        outer.addLayout(row2)
+        row3.addWidget(self.beautify_btn)
+        row3.addStretch(1)
+        outer.addLayout(row3)
         return box
 
     def _build_result(self) -> QWidget:
@@ -242,12 +275,14 @@ class MainWindow(QMainWindow):
     def _build_options(self, action: str, file_path: str, raw_out: str) -> dict:
         """按动作构造 ``processor.run`` 需要的 options。
 
-        之前所有非 extract_text 动作都只传 ``{"output_dir": out_dir}``，导致：
-          - rotate 要 ``output`` 却拿到 ``output_dir`` → ``KeyError('output')``；
-          - split / to_images 在「输出目录」留空时把文件写到根 ``/page_1.*``
-            （read-only → ``OSError 30`` / ``fzerror``）。
-        现在：输出目录留空 → 回退到源文件旁 ``processed/``（与占位提示一致）并
-        ``mkdir``；按动作给齐 ``output`` / ``output_dir`` / ``inputs`` 等键。
+        动作特有参数从参数区取：
+          - rotate → ``angle``（角度下拉 90/180/270）；
+          - to_images → ``zoom``（渲染倍率）；
+          - compress → ``quality``（压缩质量）；
+          - extract_pages → ``pages``（0-based 页码列表）；
+          - replace / replace_tokens → ``mapping``（替换映射输入）。
+        输出目录留空 → 回退到源文件旁 ``processed/``（与占位提示一致）并 ``mkdir``，
+        避免往根 ``/`` 写触发 ``OSError 30`` / ``fzerror``。
         """
         if action in ("extract_text", "analyze_structure"):
             return {}
@@ -255,22 +290,32 @@ class MainWindow(QMainWindow):
         Path(out_dir).mkdir(parents=True, exist_ok=True)
         stem = Path(file_path).stem
         suffix = Path(file_path).suffix
-        if action in ("split", "to_images", "extract_images"):
+        if action in ("split", "extract_images"):
             return {"output_dir": out_dir}
+        if action == "to_images":
+            return {"output_dir": out_dir, "zoom": self.zoom_spin.value()}
         if action == "rotate":
-            return {"output": str(Path(out_dir) / f"{stem}_rotated.pdf")}
+            return {
+                "output": str(Path(out_dir) / f"{stem}_rotated.pdf"),
+                "angle": int(self.angle_combo.currentText()),
+            }
+        if action == "extract_pages":
+            return {
+                "pages": self._parse_pages(self.pages_edit.text()),
+                "output": str(Path(out_dir) / f"{stem}_pages.pdf"),
+            }
         if action == "to_pdf":  # 图片：多图合 PDF
             return {"inputs": [file_path], "output": str(Path(out_dir) / f"{stem}.pdf")}
         if action == "compress":
-            return {"output": str(Path(out_dir) / f"{stem}_compressed{suffix}")}
+            return {
+                "output": str(Path(out_dir) / f"{stem}_compressed{suffix}"),
+                "quality": self.quality_spin.value(),
+            }
         if action in ("replace", "replace_tokens"):
             return {
                 "output": str(Path(out_dir) / f"{stem}_replaced{suffix}"),
                 "mapping": self._parse_mapping(self.replace_edit.text()),
             }
-        if action == "extract_pages":
-            # UI 暂无页码输入，默认取第 1 页（0-based）做演示。
-            return {"pages": [0], "output": str(Path(out_dir) / f"{stem}_pages.pdf")}
         return {"output_dir": out_dir}
 
     def _parse_mapping(self, text: str) -> dict[str, str]:
@@ -289,6 +334,22 @@ class MainWindow(QMainWindow):
             if old:
                 mapping[old] = new
         return mapping
+
+    def _parse_pages(self, text: str) -> list[int]:
+        """解析「0,2,5」式 0-based 页码列表。空 → ``[0]``（第 1 页）。
+
+        非数字段跳过；用于 extract_pages 的 ``pages`` 参数。
+        """
+        pages: list[int] = []
+        for part in text.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                pages.append(int(part))
+            except ValueError:
+                continue
+        return pages or [0]
 
     def _on_merge_selected(self) -> None:
         rows = sorted({i.row() for i in self.table.selectedIndexes()})
