@@ -1,0 +1,2 @@
+[console_scripts]
+wps-tool = wps_tool.app:main
