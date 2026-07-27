@@ -316,12 +316,11 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"已提交合并任务 {job_id}。")
 
     def _on_beautify_selected(self) -> None:
-        """美化选中的 PPT：只上传文本大纲（隐私优先），拿回美化建议。
+        """美化选中的 PPT：上传完整 pptx，下载美化后的 pptx 到源文件旁 processed/。
 
-        走 Registry → PptxProcessor 提取每页文本与结构（与「处理选中行」同一路径），
-        合成大纲后调 ``beautify_client.beautify_by_outline(slides)``，把返回的
-        建议 JSON 写到源文件旁 processed/。Layer (a) 服务未实现时由 Runner 转
-        failed 信号提示——UI 不崩。
+        走 ``beautify_client.beautify_file(input, output, style)``：上传完整文件，
+        把返回的 pptx 字节写到 ``processed/<文件名>_beautified.pptx``。
+        Layer (a) 服务未实现时由 Runner 转 failed 信号提示——UI 不崩。
         """
         if self.beautify_client is None:
             self.statusBar().showMessage(
@@ -342,41 +341,20 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("选中的文件不是 .pptx，无法美化。")
             return
 
-        import json
         import uuid
 
         client = self.beautify_client
-        registry = self.registry
         out_dir = self.output_edit.text().strip() or str(
             Path(file_path).parent / "processed"
         )
+        output = str(Path(out_dir) / f"{Path(file_path).stem}_beautified.pptx")
 
         def job(progress):
-            progress(0.0, "提取 PPT 大纲")
-            processor = registry.get_processor(file_path)
-            texts = processor.run(file_path, "extract_text", {})
-            struct = processor.run(file_path, "analyze_structure", {})
-            # 合成大纲：每页 page_type + 文本，不上传 pptx 字节
-            slides = [
-                {
-                    "slide": t.get("slide"),
-                    "page_type": s.get("page_type"),
-                    "texts": t.get("texts", []),
-                }
-                for t, s in zip(texts, struct)
-            ]
-            progress(0.5, "调用美化 API（仅上传大纲，隐私优先）")
-            result = client.beautify_by_outline(slides)
-            progress(0.9, "写入美化建议")
+            progress(0.0, "上传 PPT 美化（上传完整文件）")
             Path(out_dir).mkdir(parents=True, exist_ok=True)
-            out_json = str(
-                Path(out_dir) / f"{Path(file_path).stem}_beautify_outline.json"
-            )
-            Path(out_json).write_text(
-                json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            progress(1.0, "美化建议已返回")
-            return out_json
+            result = client.beautify_file(file_path, output, style="business")
+            progress(1.0, "美化完成")
+            return result
 
         new_job_id = uuid.uuid4().hex[:8]
         self.runner.submit(new_job_id, job)

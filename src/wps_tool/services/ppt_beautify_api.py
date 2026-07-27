@@ -1,12 +1,12 @@
 """PPT 美化外部 API 客户端。
 
-Layer (a) 服务算法 TODO：PptBeautifyClient.beautify_file / beautify_by_outline。
+Layer (a) 服务算法 TODO：PptBeautifyClient.beautify_file。
 类结构（构造、可注入 httpx.Client、鉴权头、关闭）已写好。
 
 关键设计（httpx 0.28，测试离线）：客户端必须持有「可注入 transport 的 httpx.Client」，
 而不是用模块级 httpx.post（瞬时 Client 无法注入 transport，无法离线测试）。
 测试用 httpx.MockTransport(handler) 注入，handler 签名 (req)->Response，
-并在 handler 里断言请求体隐私（仅大纲模式不含 .pptx / PK 头字节）。
+并在 handler 里断言请求体含 pptx 的 PK 头字节（上传完整文件模式）。
 """
 
 from __future__ import annotations
@@ -18,12 +18,12 @@ PPTX_CONTENT_TYPE = (
     "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 )
 
-#: pptx 文件的 zip 头字节（PK\\x03\\x04），用于隐私断言：仅大纲模式请求体不应含它。
+#: pptx 文件的 zip 头字节（PK\\x03\\x04），用于断言：完整文件模式请求体应含它。
 PPTX_MAGIC = b"PK\x03\x04"
 
 
 class PptBeautifyClient:
-    """PPT 美化 API 客户端（构造已写好，两个 beautify 方法是 Layer (a) TODO）。"""
+    """PPT 美化 API 客户端（构造已写好，beautify_file 是 Layer (a) TODO）。"""
 
     def __init__(
         self,
@@ -72,23 +72,6 @@ class PptBeautifyClient:
           - 测试断言请求体含 PPTX_MAGIC（b"PK\\x03\\x04"）——上传完整文件模式。
         """
         raise NotImplementedError("TODO(Layer a): 实现 PptBeautifyClient.beautify_file")
-
-    def beautify_by_outline(
-        self, slides: list[dict], style: str = "business", language: str = "zh-CN"
-    ) -> dict:
-        """[学习·Layer (a) TODO] 只上传文本大纲（隐私优先），返回美化建议 JSON。
-
-        契约：
-          - POST {base_url}/ppt/beautify-outline，json={"slides": slides, "style": style, "language": language}，
-            headers=鉴权头；
-          - response.raise_for_status()；返回 response.json()。
-          - base_url/api_key 为空时 raise ApiUnavailableError。
-
-        提示：
-          - self._client.post("/ppt/beautify-outline", json=..., headers=self._auth_headers())
-          - 测试断言请求体是 JSON 且不含 PPTX_MAGIC（仅大纲、不上传完整文件）。
-        """
-        raise NotImplementedError("TODO(Layer a): 实现 PptBeautifyClient.beautify_by_outline")
 
 
 __all__ = ["PPTX_CONTENT_TYPE", "PPTX_MAGIC", "PptBeautifyClient"]
