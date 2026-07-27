@@ -16,6 +16,8 @@ from typing import Any
 from wps_tool.core.errors import UnsupportedActionError
 from wps_tool.processors.base import FileProcessor
 
+from PIL import Image
+
 
 def images_to_pdf(image_paths: list[str], output_path: str) -> str:
     """[学习·Layer (a) TODO] 把多张图片合成一个 PDF，返回 output_path。
@@ -27,6 +29,10 @@ def images_to_pdf(image_paths: list[str], output_path: str) -> str:
 
     提示：Image.open(p).convert("RGB")；空列表时可写空 Image 或 raise，测试会给非空。
     """
+    # 多图合 PDF：所有图须 convert("RGB")，否则 RGBA/P 转 PDF 抛错
+    imgs = [Image.open(p).convert("RGB") for p in image_paths]
+    imgs[0].save(output_path, save_all=True, append_images=imgs[1:])
+    return output_path
     raise NotImplementedError("TODO(Layer a): 实现 images_to_pdf")
 
 
@@ -37,6 +43,8 @@ def compress_image(input_path: str, output_path: str, quality: int = 85) -> str:
 
     提示：quality 1..95（JPEG）；PNG 忽略 quality 只用 optimize。
     """
+    Image.open(input_path).convert("RGB").save(output_path, optimize=True, quality=quality)
+    return output_path
     raise NotImplementedError("TODO(Layer a): 实现 compress_image")
 
 
