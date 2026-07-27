@@ -22,6 +22,9 @@ from typing import Any
 from wps_tool.core.errors import UnsupportedActionError
 from wps_tool.processors.base import FileProcessor
 
+from pptx import Presentation
+from pptx.enum.shapes import MSO_SHAPE_TYPE
+
 
 def extract_pptx_text(input_path: str) -> list[dict]:
     """[学习·Layer (a) TODO] 提取每页文本，返回 list[dict]。
@@ -35,7 +38,18 @@ def extract_pptx_text(input_path: str) -> list[dict]:
                    for shape in slide.shapes if shape.has_text_frame]
           texts = [t for t in texts if t]
     """
-    raise NotImplementedError("TODO(Layer a): 实现 extract_pptx_text")
+    #要按段返回，不要整个文本框
+    prs = Presentation(input_path)
+    rst=[]
+    for i, slide in enumerate(prs.slides, start=1):
+        texts = []
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                for paragraph in shape.text_frame.paragraphs:
+                    for run in paragraph.runs:
+                        texts.append(run.text)
+        rst.append({"slide": i, "texts": texts})
+    return rst
 
 
 def extract_pptx_images(input_path: str, output_dir: str) -> list[str]:
