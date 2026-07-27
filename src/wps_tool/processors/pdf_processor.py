@@ -20,11 +20,11 @@ from __future__ import annotations
 
 from typing import Any
 
+import fitz
+from pypdf import PdfReader, PdfWriter
+
 from wps_tool.core.errors import UnsupportedActionError
 from wps_tool.processors.base import FileProcessor
-
-from pypdf import PdfReader, PdfWriter
-import fitz
 
 # ===== Layer (a) TODO：学生实现以下函数体 =====
 
@@ -63,12 +63,17 @@ def split_pdf(input_path: str, output_dir: str) -> list[str]:
       - 遍历 PdfReader(input_path).pages（或 enumerate(..., start=1)）；
       - 每页 new 一个 PdfWriter、add_page(page)、写出。
     """
-    writer = PdfWriter()
-    for i, page in enumerate(PdfReader(input_path).pages, start=1):
+    reader = PdfReader(input_path)
+    paths = []
+    for i, page in enumerate(reader.pages, start=1):
+        # 每页独立 writer，否则页会累积（page_2 会含 page_1，page_3 含 1+2）。
+        writer = PdfWriter()
         writer.add_page(page)
-        with open(f"{output_dir}/page_{i}.pdf", "wb") as f:
+        out = f"{output_dir}/page_{i}.pdf"
+        with open(out, "wb") as f:
             writer.write(f)
-    return [f"{output_dir}/page_{i}.pdf" for i in range(1, len(writer.pages) + 1)]
+        paths.append(out)
+    return paths
     raise NotImplementedError("TODO(Layer a): 实现 split_pdf")
 
 
@@ -149,7 +154,7 @@ def extract_pdf_text(input_path: str) -> str:
     text = ""
     for page in doc:
         text += page.get_text()
-        text += "\\n"
+        text += "\n"
     return text
     raise NotImplementedError("TODO(Layer a): 实现 extract_pdf_text")
 
