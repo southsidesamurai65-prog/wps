@@ -81,12 +81,14 @@ ENABLE_API_UPLOAD=true
 LLM_PROVIDER=openai
 LLM_API_KEY=你的密钥
 LLM_MODEL=gpt-4o
+LLM_BASE_URL=https://api.openai.com
 ```
 
 - `ENABLE_API_UPLOAD` 是「允许把内容发出本机」总开关（LLM 把文本发出本机，归它管）。`false`（默认）→ `app.py::build_beautify_client(settings)` 返回 `None`，不构造客户端、不注入 MainWindow；此时点「美化」只提示「未配置」，**不发任何网络请求**。
 - 仅当 `enable_api_upload=true` **且** `llm_configured()`（provider + key 都非空）时才构造 `PptBeautifyClient` 并注入。
 - 当前只实现 `provider=openai`，走 httpx 裸调（不装 `openai` SDK）；其它 provider 在构造时抛 `ApiUnavailableError`。
 - `LLM_MODEL` 可按需配，避免写死过时模型名。
+- `LLM_BASE_URL` 接入点：默认官方 OpenAI；走中转/代理/Azure/自部署的 OpenAI 兼容 endpoint 在这换，**不用改源码**。
 
 ### UI 操作步骤
 

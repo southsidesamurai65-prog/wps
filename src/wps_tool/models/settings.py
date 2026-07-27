@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     llm_provider: str = "openai"          # 当前只实现 openai；其它 provider 会抛清晰错
     llm_api_key: str = ""                 # 从 .env 的 LLM_API_KEY 读
     llm_model: str = "gpt-4o"             # 从 .env 的 LLM_MODEL 读，避免写死过时模型名
+    llm_base_url: str = "https://api.openai.com"  # 从 .env 的 LLM_BASE_URL 读；换中转/Azure/自部署 endpoint 在这
 
     def llm_configured(self) -> bool:
         """PPT 美化 LLM 是否已配置（provider + key 都非空）。"""

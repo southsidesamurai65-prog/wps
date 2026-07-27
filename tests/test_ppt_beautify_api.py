@@ -91,3 +91,28 @@ def test_beautify_file_empty_key_raises(tmp_output_dir, sample_pptx):
 def test_unsupported_provider_raises():
     with pytest.raises(ApiUnavailableError):
         PptBeautifyClient("key", model="gpt-4o", provider="gemini")
+
+
+def test_build_beautify_client_uses_llm_base_url():
+    """app.py 装配：LLM_BASE_URL 真传进 client.base_url（不写死）。
+
+    防回归：以后 build_beautify_client 漏传 base_url 时此测试会红——
+    会退回 client 构造器的默认 https://api.openai.com，与配置不符。
+    """
+    from wps_tool.app import build_beautify_client
+    from wps_tool.models.settings import Settings
+
+    s = Settings(
+        _env_file=None,
+        enable_api_upload=True,
+        llm_provider="openai",
+        llm_api_key="k",
+        llm_base_url="https://api.my-relay.example.com",
+    )
+    client = build_beautify_client(s)
+    assert client is not None
+    assert (
+        str(client.client.base_url).rstrip("/")
+        == "https://api.my-relay.example.com"
+    )
+    client.close()

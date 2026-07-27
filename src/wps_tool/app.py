@@ -52,6 +52,7 @@ def build_beautify_client(settings: Settings) -> PptBeautifyClient | None:
         api_key=settings.llm_api_key,
         model=settings.llm_model,
         provider=settings.llm_provider,
+        base_url=settings.llm_base_url,
     )
 
 
