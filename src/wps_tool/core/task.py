@@ -50,7 +50,11 @@ class TaskRunner:
 
         提示：不要在 submit 里 emit finished/failed，那是 _worker 的事。
         """
-        raise NotImplementedError("TODO(Layer c): 实现 TaskRunner.submit")
+        self.signals.started.emit(job_id)
+        progress = lambda f, m: self.signals.progress.emit(f, m)
+        future = self._executor.submit(self._worker, job_id, func, args, kwargs or {}, progress)
+        self._futures[job_id] = future
+        return job_id
 
     def _worker(
         self,
@@ -74,6 +78,13 @@ class TaskRunner:
         提示：except 里 raise 是有意的——让 future.result() 能感知失败，
         测试里用 future.result(timeout=...) 阻塞到完成。
         """
+        try:
+            result = func(progress, *args, **kwargs)
+            self.signals.finished.emit(job_id, result)
+            return result
+        except Exception as exc:
+            self.signals.failed.emit(job_id, repr(exc))
+            raise   # 让 Future 标记为失败；submit 的调用方看不到这个异常（它只看信号）
         raise NotImplementedError("TODO(Layer c): 实现 TaskRunner._worker")
 
     def cancel(self, job_id: str) -> bool:
@@ -82,6 +93,8 @@ class TaskRunner:
         契约：future = self._futures.get(job_id); return future.cancel() if future else False。
         提示：Future.cancel() 只能取消尚未开跑的；运行中任务无法强杀（M1–M3 不要求）。
         """
+        future = self._futures.get(job_id)
+        return future.cancel() if future else False
         raise NotImplementedError("TODO(Layer c): 实现 TaskRunner.cancel")
 
     def shutdown(self) -> None:
@@ -89,7 +102,7 @@ class TaskRunner:
 
         契约：self._executor.shutdown(wait=True)。
         """
-        raise NotImplementedError("TODO(Layer c): 实现 TaskRunner.shutdown")
+        self._executor.shutdown(wait=True)
 
 
 __all__ = ["TaskRunner"]

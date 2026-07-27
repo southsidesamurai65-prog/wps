@@ -19,6 +19,8 @@ from typing import Any
 from wps_tool.core.errors import UnsupportedActionError
 from wps_tool.processors.base import FileProcessor
 
+from docx import Document
+
 
 def extract_docx_text(input_path: str) -> str:
     """[学习·Layer (a) TODO] 提取正文文本，段间用 \\n 连接，返回 str。
@@ -27,6 +29,9 @@ def extract_docx_text(input_path: str) -> str:
 
     提示：from docx import Document; Document(input_path).paragraphs。
     """
+    doc = Document(input_path)
+    text = "\n".join([p.text for p in doc.paragraphs if p.text])
+    return text
     raise NotImplementedError("TODO(Layer a): 实现 extract_docx_text")
 
 
@@ -45,6 +50,13 @@ def replace_docx_text(input_path: str, output_path: str, mapping: dict[str, str]
         M1–M3 不要求处理跨 run token，只要 token 完整落在一个 run 内即可替换；
       - 测试夹具把 {{COMPANY}} 放在单 run 内，故逐 run 替换能命中。
     """
+    doc = Document(input_path)
+    for p in doc.paragraphs:
+        for r in p.runs: #run是文本，比段落还小
+            for k, v in mapping.items():
+                r.text = r.text.replace(k, v)
+    doc.save(output_path)
+    return output_path
     raise NotImplementedError("TODO(Layer a): 实现 replace_docx_text")
 
 

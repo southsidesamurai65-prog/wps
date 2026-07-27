@@ -23,6 +23,9 @@ from typing import Any
 from wps_tool.core.errors import UnsupportedActionError
 from wps_tool.processors.base import FileProcessor
 
+from pypdf import PdfReader, PdfWriter
+import fitz
+
 # ===== Layer (a) TODO：学生实现以下函数体 =====
 
 
@@ -40,6 +43,12 @@ def merge_pdfs(input_paths: list[str], output_path: str) -> str:
         也可 for page in PdfReader(p).pages: writer.add_page(page)。
       - 测试断言：输出页数 == 各输入页数之和。
     """
+    writer = PdfWriter()
+    for p in input_paths:
+        writer.append(PdfReader(p))
+    with open(output_path, "wb") as f:
+        writer.write(f)
+    return output_path
     raise NotImplementedError("TODO(Layer a): 实现 merge_pdfs")
 
 
@@ -54,6 +63,12 @@ def split_pdf(input_path: str, output_dir: str) -> list[str]:
       - 遍历 PdfReader(input_path).pages（或 enumerate(..., start=1)）；
       - 每页 new 一个 PdfWriter、add_page(page)、写出。
     """
+    writer = PdfWriter()
+    for i, page in enumerate(PdfReader(input_path).pages, start=1):
+        writer.add_page(page)
+        with open(f"{output_dir}/page_{i}.pdf", "wb") as f:
+            writer.write(f)
+    return [f"{output_dir}/page_{i}.pdf" for i in range(1, len(writer.pages) + 1)]
     raise NotImplementedError("TODO(Layer a): 实现 split_pdf")
 
 
@@ -67,6 +82,16 @@ def rotate_pdf(input_path: str, output_path: str, angle: int = 90) -> str:
 
     提示：page.rotate(angle) 原地修改并返回 page；把它 add_page 到新 writer。
     """
+    if angle!=90 and angle!=180 and angle!=270:
+        raise UnsupportedActionError("请使用正确的旋转角度(90,180,270)")
+    reader = PdfReader(input_path)
+    writer = PdfWriter()
+    for page in reader.pages:
+        page.rotate(angle)
+        writer.add_page(page)
+    with open(output_path, "wb") as f:
+        writer.write(f)
+    return output_path     
     raise NotImplementedError("TODO(Layer a): 实现 rotate_pdf")
 
 
@@ -80,6 +105,12 @@ def extract_pdf_pages(input_path: str, page_indices: list[int], output_path: str
 
     提示：pages = PdfReader(input_path).pages; writer.add_page(pages[i])。
     """
+    writer = PdfWriter()
+    for i in page_indices:
+        writer.add_page(PdfReader(input_path).pages[i])
+    with open(output_path, "wb") as f:
+        writer.write(f)
+    return output_path  
     raise NotImplementedError("TODO(Layer a): 实现 extract_pdf_pages")
 
 
@@ -98,6 +129,11 @@ def pdf_to_images(
       - page.get_pixmap(matrix=fitz.Matrix(zoom, zoom)) → pix.save(path)；
       - pix.save 按扩展名定格式，所以 path 后缀用 .{fmt}。
     """
+    doc = fitz.open(input_path)
+    for i, page in enumerate(doc):
+        pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom))
+        pix.save(f"{output_dir}/page_{i+1}.{fmt}")
+    return [f"{output_dir}/page_{i+1}.{fmt}" for i in range(len(doc))]
     raise NotImplementedError("TODO(Layer a): 实现 pdf_to_images")
 
 
@@ -109,6 +145,12 @@ def extract_pdf_text(input_path: str) -> str:
     提示：fitz.open(input_path) 后遍历 doc，page.get_text()。也可用 pypdf 的
     page.extract_text()，但 fitz 对中文/排版更稳，推荐 fitz。
     """
+    doc = fitz.open(input_path)
+    text = ""
+    for page in doc:
+        text += page.get_text()
+        text += "\\n"
+    return text
     raise NotImplementedError("TODO(Layer a): 实现 extract_pdf_text")
 
 
