@@ -73,6 +73,8 @@ class PptBeautifyClient:
           - self._client.post("/ppt/beautify", files=..., data=..., headers=self._auth_headers())
           - 测试断言请求体含 PPTX_MAGIC（b"PK\\x03\\x04"）——上传完整文件模式。
         """
+        if not self.base_url or not self.api_key:
+            raise ApiUnavailableError("base_url/api_key 不能为空")
         with open(input_path, "rb") as f:
             files = {"file": (Path(input_path).name, f, PPTX_CONTENT_TYPE)}
             data = {"style": style, "privacy_mode": "full_file"}
