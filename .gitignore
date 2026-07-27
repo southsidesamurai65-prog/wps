@@ -1,0 +1,35 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# ---- 虚拟环境 ----
+.venv/
+venv/
+env/
+# 本项目自带的虚拟环境目录（名为 wps，非源码）
+/wps/
+
+# ---- 本地配置 / 密钥（绝不入库）----
+.env
+.env.local
+
+# ---- 编辑器 / IDE ----
+.idea/
+.vscode/
+*.swp
+
+# ---- 操作系统 ----
+.DS_Store
+Thumbs.db
+
+# ---- 测试 / 类型检查缓存 ----
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/

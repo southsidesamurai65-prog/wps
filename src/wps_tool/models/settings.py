@@ -23,9 +23,17 @@ class Settings(BaseSettings):
     enable_api_upload: bool = False       # 默认关闭，所有功能本地处理
     task_max_workers: int = 2             # 后台并发数
 
+    # 本地辅助 LLM（美化建议等可选增强能力用，与美化外部 API 相互独立）。
+    llm_provider: str = "gemini"          # gemini | claude | openai
+    llm_api_key: str = ""                 # 从 .env 的 LLM_API_KEY 读
+
     def api_configured(self) -> bool:
         """美化 API 是否已配置（url + key 都非空）。"""
         return bool(self.ppt_beautify_base_url and self.ppt_beautify_api_key)
+
+    def llm_configured(self) -> bool:
+        """本地辅助 LLM 是否已配置（provider + key 都非空）。"""
+        return bool(self.llm_provider and self.llm_api_key)
 
 
 __all__ = ["Settings"]

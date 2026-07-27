@@ -20,6 +20,7 @@ from wps_tool.core.registry import ProcessorRegistry
 from wps_tool.core.runner_iface import Runner, SyncTaskRunner
 from wps_tool.models.settings import Settings
 from wps_tool.processors import register_default_processors
+from wps_tool.services.ppt_beautify_api import PptBeautifyClient
 from wps_tool.ui.main_window import MainWindow
 from wps_tool.ui.theme import apply_theme
 from wps_tool.utils.logging import setup_logging
@@ -35,6 +36,23 @@ def build_runner(settings: Settings) -> Runner:
     return SyncTaskRunner(max_workers=1)
 
 
+def build_beautify_client(settings: Settings) -> PptBeautifyClient | None:
+    """构造 PPT 美化外部 API 客户端。
+
+    隐私原则：默认不上传任何内容到外部。只有当用户在 .env 里显式
+    ``ENABLE_API_UPLOAD=true`` 且填写了 url + key 时才构造客户端，
+    否则返回 None——MainWindow 的「美化」按钮会提示未配置，不触发任何网络请求。
+    """
+    if not settings.enable_api_upload:
+        return None
+    if not settings.api_configured():
+        return None
+    return PptBeautifyClient(
+        base_url=settings.ppt_beautify_base_url,
+        api_key=settings.ppt_beautify_api_key,
+    )
+
+
 def main() -> int:
     setup_logging()
     app = QApplication.instance() or QApplication(sys.argv)
@@ -44,8 +62,14 @@ def main() -> int:
     registry = ProcessorRegistry()
     register_default_processors(registry)
     runner = build_runner(settings)
+    beautify_client = build_beautify_client(settings)
 
-    win = MainWindow(registry=registry, runner=runner, settings=settings)
+    win = MainWindow(
+        registry=registry,
+        runner=runner,
+        settings=settings,
+        beautify_client=beautify_client,
+    )
     win.show()
     return app.exec()
 
