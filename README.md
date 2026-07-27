@@ -14,7 +14,7 @@
 - **图片**：多图合成 PDF、压缩
 - **Office 转 PDF**：LibreOffice 命令行封装（DOCX/PPTX → PDF）
 - **OCR**：扫描版 PDF / 图片文字识别（pytesseract，可选）
-- **PPT 美化 API 客户端**：httpx，支持「仅上传大纲」「上传完整文件」两种隐私模式
+- **PPT 美化 API 客户端**：httpx，上传完整 pptx 拿回美化后文件
 - **桌面 UI**：拖拽导入、文件列表、参数区、进度区、后台执行不卡死
 
 覆盖范围 M1–M3（本地处理 + 转换 + 美化 API 客户端）。不含 M4 的插件化 / SQLite 任务历史 / CI。
@@ -47,18 +47,9 @@
 
 ## PPT 美化（外部 API）使用方法
 
-把一个 `.pptx` 的**文本大纲**（每页页型 + 文本）发给外部美化 API，拿回美化建议 JSON，写到源文件旁 `processed/`。**隐私优先**：默认只上传大纲文本，不上传 pptx 文件本身。
+把一个 `.pptx` **完整上传**给外部美化 API，拿回美化后的 pptx，写到源文件旁 `processed/`。
 
-### 两种调用模式
-
-`PptBeautifyClient`（`services/ppt_beautify_api.py`）有两个方法，都是 Layer (a) 服务 TODO，学生实现：
-
-| 方法 | 上传内容 | 请求体 | 用途 |
-|---|---|---|---|
-| `beautify_by_outline(slides, style, language)` | JSON 大纲 | JSON，**不含** pptx zip 头 `PK\x03\x04` | UI「美化选中 PPT」按钮用这个 |
-| `beautify_file(input_path, output_path, style)` | 完整 pptx | multipart，含 `PK\x03\x04` | 能力更强，但把文件传出去了 |
-
-UI 按钮走 outline 模式（隐私优先）；要上传完整文件请直接调 `beautify_file`（见下「程序化使用」）。
+> 此模式上传完整 pptx 文件——文件内容会离开本机。若文件含敏感信息，请先脱敏或离线处理后再启用。
 
 ### 配置（`.env`）
 
@@ -85,28 +76,16 @@ LLM_API_KEY=
 1. 启动 `./wps/bin/python -m wps_tool`，拖一个 `.pptx` 进窗口（或「打开文件…」）。
 2. 在文件表里**选中一行 `.pptx`**（一次只美化一个；选中多行或非 `.pptx` 会提示）。
 3. 点参数区「**美化选中 PPT**」按钮。
-4. 后台执行：走 `Registry → PptxProcessor` 提取每页文本（`extract_text`）+ 结构（`analyze_structure`）→ 合成大纲 → 调 `client.beautify_by_outline(slides)`。
-5. 返回的建议 JSON 写到「输出目录」（留空则源文件旁 `processed/`）下 `<文件名>_beautify_outline.json`。
+4. 后台执行：调 `client.beautify_file(input, output, style)`，把完整 pptx 上传到 `{base_url}/ppt/beautify`，下载返回的 pptx 字节。
+5. 美化后的文件写到「输出目录」（留空则源文件旁 `processed/`）下 `<文件名>_beautified.pptx`，路径显示在「结果」区。
 6. 进度/成败在状态栏与进度区显示；失败（含服务 TODO 未实现时）经 runner 的 `failed` 信号提示，UI 不崩。
 
-### 上传的大纲长什么样
+### 隐私说明
 
-`beautify_by_outline` 收到的 `slides` 是 `list[dict]`，每页一项：
-
-```json
-[
-  {"slide": 1, "page_type": "title",   "texts": ["季度汇报"]},
-  {"slide": 2, "page_type": "content", "texts": ["要点一", "要点二"]}
-]
-```
-
-`page_type` 来自 `analyze_pptx_structure`（`title` / `section` / `content`，按 `slide_layout.name` 判），`texts` 来自 `extract_pptx_text`（每页各文本框文本）。
-
-### 隐私保证
-
-- outline 模式请求体是 JSON，**不含** pptx 的 zip 头字节 `PK\x03\x04`——`tests/test_ppt_beautify_api.py` 把这条隐私要求写成可执行断言（仅大纲模式不含，完整文件模式必含）。
+- 美化需上传完整 pptx 文件——文件内容会离开本机。请确认文件不含不宜外传的敏感信息后再启用，或先脱敏。
 - 默认关闭（`ENABLE_API_UPLOAD=false`），所有功能本地处理。
 - API Key 只存本地 `.env`（`.gitignore` 已忽略 `.env`）。
+- `tests/test_ppt_beautify_api.py` 把「确实上传了完整文件」写成可执行断言：请求体必含 pptx 的 zip 头字节 `PK\x03\x04`（`PPTX_MAGIC`）。
 
 ### 程序化使用（不走 UI）
 
@@ -114,22 +93,16 @@ LLM_API_KEY=
 from wps_tool.services.ppt_beautify_api import PptBeautifyClient
 
 client = PptBeautifyClient(base_url="https://api.example.com", api_key="...")
-# 只上传大纲（隐私优先）
-suggestions = client.beautify_by_outline(
-    [{"slide": 1, "page_type": "title", "texts": ["标题"]}],
-    style="business",
-    language="zh-CN",
-)
-# 或上传完整文件，下载美化后的 pptx
+# 上传完整 pptx，下载美化后的 pptx
 client.beautify_file("in.pptx", "out.pptx", style="business")
 client.close()
 ```
 
-测试用 `httpx.MockTransport` 离线注入 transport，在 handler 里断言请求体隐私——**不联网也能跑**。
+测试用 `httpx.MockTransport` 离线注入 transport，在 handler 里断言请求体含 PK 头——**不联网也能跑**。
 
 ### 注意：服务方法目前是 TODO
 
-`beautify_file` / `beautify_by_outline` 是 Layer (a) 服务 TODO（`raise NotImplementedError`）。**接线已就位**（`app.py` 装配 + UI 按钮 + settings 字段 + `.env.example`），但方法体要学生实现。实现前点「美化」会经 runner 的 `failed` 信号显示 `NotImplementedError`——这是 spec 看板，不是 bug。
+`beautify_file` 是 Layer (a) 服务 TODO（`raise NotImplementedError`）。**接线已就位**（`app.py` 装配 + UI 按钮 + settings 字段 + `.env.example`），但方法体要学生实现。实现前点「美化」会经 runner 的 `failed` 信号显示 `NotImplementedError`——这是 spec 看板，不是 bug。
 
 ---
 
@@ -197,7 +170,7 @@ wps/
     │   └── image_processor.py       # [TODO·a] images_to_pdf/compress_image
     ├── services/
     │   ├── office_convert.py        # [完整] LibreOffice 子进程封装 + 可用性检测
-    │   ├── ppt_beautify_api.py      # [TODO·a] PptBeautifyClient.beautify_file/beautify_by_outline
+    │   ├── ppt_beautify_api.py      # [TODO·a] PptBeautifyClient.beautify_file
     │   └── ocr_service.py           # [TODO·a] ocr_image（pytesseract）
     ├── models/
     │   ├── file_job.py              # [完整] FileJob dataclass + JobStatus 枚举
@@ -238,7 +211,7 @@ tests/
 | | `analyze_pptx_structure` | 用 `slide_layout.name` 判页型 |
 | | `replace_pptx_tokens` | 遍历 run 替换 |
 | `image_processor.py` | `images_to_pdf` `compress_image` | Pillow 多图合 PDF / 压缩 |
-| `ppt_beautify_api.py` | `beautify_file` `beautify_by_outline` | httpx multipart / JSON、鉴权、隐私模式 |
+| `ppt_beautify_api.py` | `beautify_file` | httpx multipart、鉴权 |
 | `ocr_service.py` | `ocr_image` | pytesseract 调用 |
 
 ### Layer (b) 处理器注册调度
@@ -346,11 +319,11 @@ r = client.post("/ppt/beautify", files={"file": (name, f, ctype)},
                 data={"style": "business"}, headers={"Authorization": f"Bearer {key}"})
 r.raise_for_status()
 
-# 离线测试用 MockTransport，handler 可断言请求体隐私
-transport = httpx.MockTransport(lambda req: httpx.Response(200, json={...}))
+# 离线测试用 MockTransport，handler 可断言请求体含 PK 头
+transport = httpx.MockTransport(lambda req: httpx.Response(200, content=b""))
 ```
 
-`PPTX_MAGIC = b"PK\x03\x04"`（pptx 的 zip 头）：仅大纲模式请求体不应含它，完整文件模式应含它——隐私要求据此变成可执行断言。
+`PPTX_MAGIC = b"PK\x03\x04"`（pptx 的 zip 头）：完整文件模式请求体应含它——据此写成可执行断言（确实上传了完整文件）。
 
 ### Pillow（图片）
 
