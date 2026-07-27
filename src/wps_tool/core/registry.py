@@ -38,7 +38,10 @@ class ProcessorRegistry:
           - 不要缓存结果：注册顺序可能变化。
           - 想让后注册的处理器优先（覆盖默认），可倒序遍历 self._processors[::-1]。
         """
-        raise NotImplementedError("TODO(Layer b): 实现 ProcessorRegistry.get_processor")
+        for p in self._processors:
+            if p.can_handle(file_path):
+                return p
+        raise NoProcessorError(file_path)
 
     def can_handle(self, file_path: str) -> bool:
         """是否任一已注册处理器能处理该文件（已写好胶水，学生不要改）。"""
