@@ -377,16 +377,16 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"已提交合并任务 {job_id}。")
 
     def _on_beautify_selected(self) -> None:
-        """美化选中的 PPT：上传完整 pptx，下载美化后的 pptx 到源文件旁 processed/。
+        """美化选中的 PPT：本地解析 → 文本发 LLM 拿 spec → 本地渲染重建 deck。
 
-        走 ``beautify_client.beautify_file(input, output, style)``：上传完整文件，
-        把返回的 pptx 字节写到 ``processed/<文件名>_beautified.pptx``。
-        Layer (a) 服务未实现时由 Runner 转 failed 信号提示——UI 不崩。
+        走 ``beautify_client.beautify_file(input, output, style)``：pptx 二进制不出本机，
+        只把每页文本发给 LLM，再用 python-pptx 本地重建一套干净 deck，写到
+        ``processed/<文件名>_beautified.pptx``。服务方法未就绪时由 Runner 转 failed 信号提示——UI 不崩。
         """
         if self.beautify_client is None:
             self.statusBar().showMessage(
-                "美化 API 未配置：在 .env 设 ENABLE_API_UPLOAD=true 并填写"
-                " PPT_BEAUTIFY_BASE_URL / PPT_BEAUTIFY_API_KEY 后重启。"
+                "美化 LLM 未配置：在 .env 设 ENABLE_API_UPLOAD=true 并填写"
+                " LLM_PROVIDER=openai / LLM_API_KEY（可选 LLM_MODEL）后重启。"
             )
             return
         rows = sorted({i.row() for i in self.table.selectedIndexes()})
@@ -411,7 +411,7 @@ class MainWindow(QMainWindow):
         output = str(Path(out_dir) / f"{Path(file_path).stem}_beautified.pptx")
 
         def job(progress):
-            progress(0.0, "上传 PPT 美化（上传完整文件）")
+            progress(0.0, "美化 PPT（本地解析 → LLM → 本地渲染）")
             Path(out_dir).mkdir(parents=True, exist_ok=True)
             result = client.beautify_file(file_path, output, style="business")
             progress(1.0, "美化完成")

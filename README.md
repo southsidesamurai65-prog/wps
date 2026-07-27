@@ -14,7 +14,7 @@
 - **图片**：多图合成 PDF、压缩
 - **Office 转 PDF**：LibreOffice 命令行封装（DOCX/PPTX → PDF）
 - **OCR**：扫描版 PDF / 图片文字识别（pytesseract，可选）
-- **PPT 美化 API 客户端**：httpx，上传完整 pptx 拿回美化后文件
+- **PPT 美化**：LLM + 本地渲染——本地解析 pptx，把每页文本发给 LLM（OpenAI，httpx 裸调）拿「重设计 spec」，再用 python-pptx 本地重建一套干净 deck
 - **桌面 UI**：拖拽导入、文件列表、参数区、进度区、后台执行不卡死
 
 覆盖范围 M1–M3（本地处理 + 转换 + 美化 API 客户端）。不含 M4 的插件化 / SQLite 任务历史 / CI。
@@ -45,11 +45,32 @@
 
 ---
 
-## PPT 美化（外部 API）使用方法
+## PPT 美化（LLM + 本地渲染）使用方法
 
-把一个 `.pptx` **完整上传**给外部美化 API，拿回美化后的 pptx，写到源文件旁 `processed/`。
+美化一个 `.pptx`：**本地解析** → 把每页「文本/结构」发给 LLM（OpenAI）拿回「重设计 spec」→ **本地渲染**重建一套干净 deck，写到源文件旁 `processed/`。
 
-> 此模式上传完整 pptx 文件——文件内容会离开本机。若文件含敏感信息，请先脱敏或离线处理后再启用。
+> 隐私：pptx 的二进制本体**不出本机**，发出本机的只有每页文本。请求体不含 pptx 的 zip 头字节 `PK\x03\x04`（`PPTX_MAGIC`）——这是写进测试的可执行断言。若每页文本本身含敏感信息，仍会发给 LLM，请自行评估后再启用。
+
+### 流程
+
+1. 本地解析：`extract_pptx_text` + `analyze_pptx_structure`（复用 pptx 处理器，纯本地）。
+2. 文本 spec → OpenAI `POST /v1/chat/completions`，`response_format={"type":"json_object"}` 强制 JSON，`Authorization: Bearer {key}`。LLM 既改写文案也定版式/配色，返回 spec。
+3. 本地渲染：`render_beautified_deck(spec, output, style)` 用 python-pptx 在本地重建 deck（Blank 版式 + accent 色标题条 + bullets / two_column），`prs.save(output)`。
+
+### spec 协议（LLM 返回）
+
+```json
+{
+  "theme": {"accent": "#1F4E79", "bg": "#FFFFFF"},
+  "slides": [
+    {"layout": "title",      "title": "季度汇报", "subtitle": "2026 Q2"},
+    {"layout": "bullets",    "title": "业绩",   "bullets": ["收入 +18%", "成本 -4%"]},
+    {"layout": "two_column", "title": "对比",   "left": ["Q1"], "right": ["Q2"]}
+  ]
+}
+```
+
+约束：spec 页数 == 源页数（1:1，`beautify_file` 在对不齐时会按源文本兜底补齐/截断）；layout 取 `title` / `bullets` / `two_column`。v1 是「重设计文本 deck」，不搬运原图图片。
 
 ### 配置（`.env`）
 
@@ -57,52 +78,44 @@
 
 ```ini
 ENABLE_API_UPLOAD=true
-PPT_BEAUTIFY_BASE_URL=https://api.example.com
-PPT_BEAUTIFY_API_KEY=你的密钥
+LLM_PROVIDER=openai
+LLM_API_KEY=你的密钥
+LLM_MODEL=gpt-4o
 ```
 
-- `ENABLE_API_UPLOAD=false`（默认）→ `app.py::build_beautify_client(settings)` 返回 `None`，不构造客户端、不注入 MainWindow；此时点「美化」只提示「未配置」，**不发任何网络请求**。
-- 仅当 `enable_api_upload=true` **且** `api_configured()`（url + key 都非空）时才构造 `PptBeautifyClient` 并注入。
-
-可选的本地辅助 LLM（与美化外部 API 相互独立，供后续本地增强能力用）：
-
-```ini
-LLM_PROVIDER=gemini   # gemini | claude | openai
-LLM_API_KEY=
-```
+- `ENABLE_API_UPLOAD` 是「允许把内容发出本机」总开关（LLM 把文本发出本机，归它管）。`false`（默认）→ `app.py::build_beautify_client(settings)` 返回 `None`，不构造客户端、不注入 MainWindow；此时点「美化」只提示「未配置」，**不发任何网络请求**。
+- 仅当 `enable_api_upload=true` **且** `llm_configured()`（provider + key 都非空）时才构造 `PptBeautifyClient` 并注入。
+- 当前只实现 `provider=openai`，走 httpx 裸调（不装 `openai` SDK）；其它 provider 在构造时抛 `ApiUnavailableError`。
+- `LLM_MODEL` 可按需配，避免写死过时模型名。
 
 ### UI 操作步骤
 
 1. 启动 `./wps/bin/python -m wps_tool`，拖一个 `.pptx` 进窗口（或「打开文件…」）。
 2. 在文件表里**选中一行 `.pptx`**（一次只美化一个；选中多行或非 `.pptx` 会提示）。
 3. 点参数区「**美化选中 PPT**」按钮。
-4. 后台执行：调 `client.beautify_file(input, output, style)`，把完整 pptx 上传到 `{base_url}/ppt/beautify`，下载返回的 pptx 字节。
+4. 后台执行：调 `client.beautify_file(input, output, style)`——本地解析 + 文本发 OpenAI + 本地渲染重建 deck。
 5. 美化后的文件写到「输出目录」（留空则源文件旁 `processed/`）下 `<文件名>_beautified.pptx`，路径显示在「结果」区。
-6. 进度/成败在状态栏与进度区显示；失败（含服务 TODO 未实现时）经 runner 的 `failed` 信号提示，UI 不崩。
+6. 进度/成败在状态栏与进度区显示；失败经 runner 的 `failed` 信号提示，UI 不崩。
 
 ### 隐私说明
 
-- 美化需上传完整 pptx 文件——文件内容会离开本机。请确认文件不含不宜外传的敏感信息后再启用，或先脱敏。
+- pptx 二进制不出本机——发出本机的只有每页文本。请确认每页文本不含不宜外传的敏感信息后再启用，或先脱敏。
 - 默认关闭（`ENABLE_API_UPLOAD=false`），所有功能本地处理。
 - API Key 只存本地 `.env`（`.gitignore` 已忽略 `.env`）。
-- `tests/test_ppt_beautify_api.py` 把「确实上传了完整文件」写成可执行断言：请求体必含 pptx 的 zip 头字节 `PK\x03\x04`（`PPTX_MAGIC`）。
+- `tests/test_ppt_beautify_api.py` 把「只发文本」写成可执行断言：请求体**不含** `PPTX_MAGIC`（`PK\x03\x04`），且打到 `/v1/chat/completions`、带鉴权、含 `model` 与 `response_format`。
 
 ### 程序化使用（不走 UI）
 
 ```python
 from wps_tool.services.ppt_beautify_api import PptBeautifyClient
 
-client = PptBeautifyClient(base_url="https://api.example.com", api_key="...")
-# 上传完整 pptx，下载美化后的 pptx
+client = PptBeautifyClient("sk-...", model="gpt-4o")
+# 本地解析 → 文本发 OpenAI → 本地渲染重建 deck
 client.beautify_file("in.pptx", "out.pptx", style="business")
 client.close()
 ```
 
-测试用 `httpx.MockTransport` 离线注入 transport，在 handler 里断言请求体含 PK 头——**不联网也能跑**。
-
-### 注意：服务方法目前是 TODO
-
-`beautify_file` 是 Layer (a) 服务 TODO（`raise NotImplementedError`）。**接线已就位**（`app.py` 装配 + UI 按钮 + settings 字段 + `.env.example`），但方法体要学生实现。实现前点「美化」会经 runner 的 `failed` 信号显示 `NotImplementedError`——这是 spec 看板，不是 bug。
+测试用 `httpx.MockTransport` 离线注入 transport，handler 回一段 canned chat-completion——**不联网也能跑**。渲染器 `render_beautified_deck` 是纯函数，`tests/test_ppt_renderer.py` 直接驱动、不碰网络。
 
 ---
 
@@ -170,7 +183,8 @@ wps/
     │   └── image_processor.py       # [TODO·a] images_to_pdf/compress_image
     ├── services/
     │   ├── office_convert.py        # [完整] LibreOffice 子进程封装 + 可用性检测
-    │   ├── ppt_beautify_api.py      # [TODO·a] PptBeautifyClient.beautify_file
+    │   ├── ppt_beautify_api.py      # [完整] PptBeautifyClient：本地解析→LLM spec→本地渲染（隐私：只发文本）
+    │   ├── ppt_renderer.py          # [完整] render_beautified_deck（本地渲染重建 deck，纯函数无网络）
     │   └── ocr_service.py           # [TODO·a] ocr_image（pytesseract）
     ├── models/
     │   ├── file_job.py              # [完整] FileJob dataclass + JobStatus 枚举
@@ -211,7 +225,7 @@ tests/
 | | `analyze_pptx_structure` | 用 `slide_layout.name` 判页型 |
 | | `replace_pptx_tokens` | 遍历 run 替换 |
 | `image_processor.py` | `images_to_pdf` `compress_image` | Pillow 多图合 PDF / 压缩 |
-| `ppt_beautify_api.py` | `beautify_file` | httpx multipart、鉴权 |
+| `ppt_beautify_api.py` | `beautify_file` | httpx + OpenAI chat-completions、本地解析→LLM→本地渲染（隐私：只发文本） |
 | `ocr_service.py` | `ocr_image` | pytesseract 调用 |
 
 ### Layer (b) 处理器注册调度
@@ -308,22 +322,27 @@ for slide in prs.slides:
     layout_name = slide.slide_layout.name # "Title Slide" / "Title and Content" ...
 ```
 
-### httpx（PPT 美化 API）
+### httpx（PPT 美化：OpenAI Chat Completions）
 
 ```python
 import httpx
 
 # 客户端必须持有「可注入 transport 的 Client」才能离线测
-client = httpx.Client(base_url=url, transport=transport, timeout=120)
-r = client.post("/ppt/beautify", files={"file": (name, f, ctype)},
-                data={"style": "business"}, headers={"Authorization": f"Bearer {key}"})
+client = httpx.Client(base_url="https://api.openai.com", transport=transport, timeout=120)
+r = client.post(
+    "/v1/chat/completions",
+    json={"model": "gpt-4o", "messages": [...], "response_format": {"type": "json_object"}},
+    headers={"Authorization": f"Bearer {key}"},
+)
 r.raise_for_status()
+spec = r.json()["choices"][0]["message"]["content"]  # JSON 字符串，再 json.loads
 
-# 离线测试用 MockTransport，handler 可断言请求体含 PK 头
-transport = httpx.MockTransport(lambda req: httpx.Response(200, content=b""))
+# 离线测试用 MockTransport，handler 回 canned chat-completion
+transport = httpx.MockTransport(lambda req: httpx.Response(
+    200, json={"choices": [{"message": {"content": spec_json_str}}]}))
 ```
 
-`PPTX_MAGIC = b"PK\x03\x04"`（pptx 的 zip 头）：完整文件模式请求体应含它——据此写成可执行断言（确实上传了完整文件）。
+`PPTX_MAGIC = b"PK\x03\x04"`（pptx 的 zip 头）：美化只发文本，**请求体不应含它**——据此写成可执行隐私断言。本地渲染产物则**应**以它开头（合法 pptx zip）。
 
 ### Pillow（图片）
 

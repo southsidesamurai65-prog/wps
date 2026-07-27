@@ -37,19 +37,21 @@ def build_runner(settings: Settings) -> Runner:
 
 
 def build_beautify_client(settings: Settings) -> PptBeautifyClient | None:
-    """构造 PPT 美化外部 API 客户端。
+    """构造 PPT 美化客户端（LLM + 本地渲染）。
 
-    隐私原则：默认不上传任何内容到外部。只有当用户在 .env 里显式
-    ``ENABLE_API_UPLOAD=true`` 且填写了 url + key 时才构造客户端，
-    否则返回 None——MainWindow 的「美化」按钮会提示未配置，不触发任何网络请求。
+    隐私原则：pptx 二进制不出本机，美化只把每页「文本」发给 LLM。
+    ``ENABLE_API_UPLOAD`` 是「允许把内容发出本机」总开关（LLM 把文本发出本机，归它管）；
+    只有 ``enable_api_upload=true`` **且** ``llm_configured()``（provider + key 都非空）
+    时才构造客户端，否则返回 None——MainWindow 的「美化」按钮会提示未配置，不触发任何网络请求。
     """
     if not settings.enable_api_upload:
         return None
-    if not settings.api_configured():
+    if not settings.llm_configured():
         return None
     return PptBeautifyClient(
-        base_url=settings.ppt_beautify_base_url,
-        api_key=settings.ppt_beautify_api_key,
+        api_key=settings.llm_api_key,
+        model=settings.llm_model,
+        provider=settings.llm_provider,
     )
 
 

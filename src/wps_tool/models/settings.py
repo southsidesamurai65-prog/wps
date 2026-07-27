@@ -17,22 +17,18 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    ppt_beautify_base_url: str = ""
-    ppt_beautify_api_key: str = ""
     default_output_dir: str = ""
     enable_api_upload: bool = False       # 默认关闭，所有功能本地处理
     task_max_workers: int = 2             # 后台并发数
 
-    # 本地辅助 LLM（美化建议等可选增强能力用，与美化外部 API 相互独立）。
-    llm_provider: str = "gemini"          # gemini | claude | openai
+    # PPT 美化用的 LLM（本地解析 → 文本发 LLM 拿「重设计 spec」→ 本地渲染重建 deck。
+    # pptx 字节不出本机，只发每页文本给 LLM）。
+    llm_provider: str = "openai"          # 当前只实现 openai；其它 provider 会抛清晰错
     llm_api_key: str = ""                 # 从 .env 的 LLM_API_KEY 读
-
-    def api_configured(self) -> bool:
-        """美化 API 是否已配置（url + key 都非空）。"""
-        return bool(self.ppt_beautify_base_url and self.ppt_beautify_api_key)
+    llm_model: str = "gpt-4o"             # 从 .env 的 LLM_MODEL 读，避免写死过时模型名
 
     def llm_configured(self) -> bool:
-        """本地辅助 LLM 是否已配置（provider + key 都非空）。"""
+        """PPT 美化 LLM 是否已配置（provider + key 都非空）。"""
         return bool(self.llm_provider and self.llm_api_key)
 
 

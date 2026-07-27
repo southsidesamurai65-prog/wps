@@ -1,36 +1,93 @@
-"""PPT 美化 API 客户端 spec（Layer a 服务算法，离线）。
+"""PPT 美化客户端 spec（LLM + 本地渲染，离线）。
 
-用 httpx.MockTransport 注入，handler 里断言请求体含 pptx 的 PK 头字节
-（上传完整文件模式）。
+用 httpx.MockTransport 注入：handler 回一段 canned OpenAI Chat Completions 响应，
+断言：
+  - 产物是合法 pptx（zip 头 PK\\x03\\x04）、可打开、页数 == spec 页数、标题在场；
+  - 请求体**不含** pptx 二进制（隐私：只发文本）——断言 PPTX_MAGIC **不在** content；
+  - 请求打到 /v1/chat/completions、带 Authorization、含 model 与 response_format。
 """
 
 from __future__ import annotations
 
-import httpx
+import json
 
+import httpx
+import pytest
+from pptx import Presentation
+
+from wps_tool.core.errors import ApiUnavailableError
 from wps_tool.services.ppt_beautify_api import PPTX_MAGIC, PptBeautifyClient
 
+#: canned spec：2 页，与 conftest 的 sample_pptx（2 页）页数一致。
+SPEC = {
+    "theme": {"accent": "#1F4E79", "bg": "#FFFFFF"},
+    "slides": [
+        {"layout": "title", "title": "重设标题", "subtitle": "2026"},
+        {"layout": "bullets", "title": "要点", "bullets": ["A1", "A2"]},
+    ],
+}
 
-def _capture(captured, body=b""):
+
+def _chat_completion_handler(captured: dict):
     def handler(request: httpx.Request) -> httpx.Response:
         captured["request"] = request
         captured["content"] = request.content
-        return httpx.Response(200, content=body)
+        body = json.loads(request.content)
+        captured["body"] = body
+        content = json.dumps(SPEC, ensure_ascii=False)
+        resp = {
+            "choices": [{"message": {"role": "assistant", "content": content}}]
+        }
+        return httpx.Response(200, json=resp)
 
     return handler
 
 
-def test_beautify_file_sends_full_pptx(sample_pptx, tmp_output_dir):
+def test_beautify_file_sends_text_only_and_renders(sample_pptx, tmp_output_dir):
     captured: dict = {}
     out = tmp_output_dir / "beautified.pptx"
-    body = b"PPTX_RESULT_BYTES"
-    transport = httpx.MockTransport(_capture(captured, body=body))
-    client = PptBeautifyClient("https://api.example.com", "key", transport=transport)
+    transport = httpx.MockTransport(_chat_completion_handler(captured))
+    client = PptBeautifyClient("key", model="gpt-4o", transport=transport)
 
-    client.beautify_file(str(sample_pptx), str(out))
-    assert out.read_bytes() == body
+    result = client.beautify_file(str(sample_pptx), str(out), style="business")
 
-    assert PPTX_MAGIC in captured["content"]  # 上传了完整文件
-    assert captured["request"].url.path == "/ppt/beautify"
+    assert result == str(out)
+    # 产物是合法 pptx zip，且渲染了 spec 的页数与标题。
+    assert out.read_bytes().startswith(PPTX_MAGIC)
+    prs = Presentation(str(out))
+    assert len(prs.slides) == len(SPEC["slides"])
+    rendered_text = "\n".join(
+        shape.text_frame.text
+        for slide in prs.slides
+        for shape in slide.shapes
+        if shape.has_text_frame
+    )
+    assert "重设标题" in rendered_text
+    assert "A1" in rendered_text
+
+    # 隐私：请求体不含 pptx 二进制（只发文本）。
+    assert PPTX_MAGIC not in captured["content"]
+
+    # 请求打到 OpenAI Chat Completions，带鉴权，body 含 model 与 response_format。
+    assert captured["request"].url.path == "/v1/chat/completions"
     assert captured["request"].headers["Authorization"] == "Bearer key"
+    assert captured["body"]["model"] == "gpt-4o"
+    assert captured["body"]["response_format"] == {"type": "json_object"}
+    # user 消息里带的是源 pptx 的每页文本（T1/sub/T2/b1/b2），而非二进制。
+    user_msg = next(
+        m["content"] for m in captured["body"]["messages"] if m["role"] == "user"
+    )
+    assert "T1" in user_msg and "T2" in user_msg
     client.close()
+
+
+def test_beautify_file_empty_key_raises(tmp_output_dir, sample_pptx):
+    client = PptBeautifyClient("", model="gpt-4o", transport=httpx.MockTransport(lambda r: httpx.Response(200)))
+    with pytest.raises(ApiUnavailableError):
+        client.beautify_file(str(sample_pptx), str(tmp_output_dir / "x.pptx"))
+    client.close()
+
+
+def test_unsupported_provider_raises():
+    with pytest.raises(ApiUnavailableError):
+        PptBeautifyClient("key", model="gpt-4o", provider="gemini")
