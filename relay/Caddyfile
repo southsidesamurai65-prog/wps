@@ -1,0 +1,35 @@
+# 中转反代（relay）：校验 relay token → 换成真实 key → 透传到真实后端。
+# 真实后端的 URL 和 key 只在本机环境变量里，调用方看不到。
+#
+# 环境变量（见 .env.example，运行前 export 或用 systemd EnvironmentFile）：
+#   RELAY_DOMAIN  — 指向这台服务器的域名（Caddy 据此自动签 HTTPS 证书）
+#   RELAY_TOKEN   — 发给「别人」的访问令牌；调用方的 LLM_API_KEY 填它
+#   REAL_KEY      — 真实后端 API key，只放服务器
+#   REAL_BASE_URL — 真实后端（OpenAI 兼容），如 https://api.openai.com
+#
+# 运行：  set -a; . ./.env; set +a; caddy run --config Caddyfile
+# 或 systemd：见 relay/README.md。
+
+{$RELAY_DOMAIN} {
+	# 1) 访问控制：只放行带正确 relay token 的请求（调用方发的 Authorization）
+	@valid header Authorization "Bearer {$RELAY_TOKEN}"
+	handle @valid {
+		# 2) 注入真实后端 key（覆盖调用方的 token；真实 key 只在本机）
+		header_up Authorization "Bearer {$REAL_KEY}"
+		# 3) 透传到真实后端：body 原样不动（model/messages/response_format 保留），
+		#    路径 /v1/chat/completions 原样转发到 {REAL_BASE_URL}/v1/chat/completions。
+		#    reverse_proxy https://... 默认用 URL host 做 SNI + Host 头；
+		#    若后端因 Host 头拒绝，下面 reverse_proxy 块里加：header_up Host <后端 host>
+		reverse_proxy {$REAL_BASE_URL}
+	}
+	# 4) 没带 token / token 错 → 401（真实 key 绝不暴露）
+	handle {
+		respond "unauthorized" 401
+	}
+
+	# 访问日志（谁在用、用了多少），可选
+	log {
+		output file /var/log/caddy/relay.log
+		format json
+	}
+}
