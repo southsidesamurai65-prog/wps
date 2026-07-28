@@ -33,3 +33,8 @@ Thumbs.db
 .ruff_cache/
 .coverage
 htmlcov/
+
+# ---- 文档 ----
+*.pptx
+*.docx
+*.pdf
