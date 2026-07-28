@@ -16,6 +16,7 @@
 - **OCR**：扫描版 PDF / 图片文字识别（pytesseract，可选）
 - **PPT 美化**：LLM + 本地渲染——本地解析 pptx 每页 shape 清单（文本 + 图片占位），把清单（**不含图片字节**）发给 LLM（OpenAI，httpx 裸调）拿「shape 级重设计 spec」，再用 python-pptx 按 spec 坐标逐 shape 摆、本地抽图插入，重建一套干净 deck
 - **桌面 UI**：拖拽导入、文件列表、参数区、进度区、后台执行不卡死
+- **中转反代（relay，部署侧）**：可选——Caddy 单文件反代，把真实后端 key 藏在服务器、给调用方发 token；wps_tool 这边零代码改动。见下「中转反代（relay）部署」节。
 
 覆盖范围 M1–M3（本地处理 + 转换 + 美化 API 客户端）。不含 M4 的插件化 / SQLite 任务历史 / CI。
 
@@ -98,7 +99,7 @@ LLM_BASE_URL=https://api.openai.com
 - 仅当 `enable_api_upload=true` **且** `llm_configured()`（provider + key 都非空）时才构造 `PptBeautifyClient` 并注入。
 - 当前只实现 `provider=openai`，走 httpx 裸调（不装 `openai` SDK）；其它 provider 在构造时抛 `ApiUnavailableError`。
 - `LLM_MODEL` 可按需配，避免写死过时模型名。
-- `LLM_BASE_URL` 接入点：默认官方 OpenAI；走中转/代理/Azure/自部署的 OpenAI 兼容 endpoint 在这换，**不用改源码**。
+- `LLM_BASE_URL` 接入点：默认官方 OpenAI；走中转/代理/Azure/自部署的 OpenAI 兼容 endpoint 在这换，**不用改源码**。自建反代（relay）见下「中转反代（relay）部署」节——届时 URL 填 relay 域名、KEY 填 relay 发的 token（不是真实 key）。
 
 ### UI 操作步骤
 
@@ -128,6 +129,45 @@ client.close()
 ```
 
 测试用 `httpx.MockTransport` 离线注入 transport，handler 回一段 canned chat-completion——**不联网也能跑**。渲染器 `render_beautified_deck` 是纯函数，`tests/test_ppt_renderer.py` 直接驱动、不碰网络。
+
+---
+
+## 中转反代（relay）部署
+
+「中转反代」= 别人用 wps_tool（或任何 OpenAI 兼容客户端）时，请求先打到**你自己这台公网服务器**，relay 校验 token 后把 `Authorization` 换成真实后端 key 透传过去——**真实后端 URL + key 只在服务器，调用方只拿到 relay 域名 + relay token**。用 Caddy 单文件搞定 HTTPS + token 校验 + key 注入 + 透传，零 certbot、零 Python；wps_tool 这边零代码改动（它本来就把 `LLM_API_KEY` 当 Bearer 发）。
+
+链路：
+
+```text
+调用方（别人 wps_tool）
+  POST https://relay.你的域名/v1/chat/completions
+  Authorization: Bearer <relay token>        ← 调用方只知道 token
+      │  Caddy @valid 匹配 token → header_up 把 Authorization 换成
+      ▼  Authorization: Bearer <真实 key>     ← 真实 key 只在服务器
+  https://真实后端/v1/chat/completions   （body 原样透传）
+      │  返回 OpenAI envelope（choices[0].message.content）
+      ▼
+  Caddy 原样回给调用方
+```
+
+文件（`relay/`，详见 `relay/README.md`）：
+
+- `Caddyfile` — token 校验（`@valid header`）+ key 注入（`header_up`）+ `reverse_proxy` 透传，无/错 token → 401。
+- `.env.example` — `RELAY_DOMAIN` / `RELAY_TOKEN` / `REAL_KEY` / `REAL_BASE_URL`（真实值不进 git，`.env` 已被 `.gitignore` 忽略）。
+- `README.md` — 前置 / 部署（含 systemd）/ 给别人用 / 安全 / 排错表 / 扩展。
+- `smoke.sh` — 带 token→200 + `choices[0].message.content`、不带/错→401 烟测。
+
+wps_tool 接 relay（零代码改动，只改 `.env`）：
+
+```ini
+ENABLE_API_UPLOAD=true
+LLM_BASE_URL=https://relay.你的域名   # relay 域名（不是真实后端）
+LLM_API_KEY=relay-发给你的-token        # relay token（不是真实 key）
+```
+
+部署速记：服务器装 Caddy → `cp relay/.env.example relay/.env` 填四个值（`RELAY_TOKEN` 用 `openssl rand -hex 32`）→ 域名 A 记录指向服务器、开放 80/443 → `set -a; . relay/.env; set +a; caddy run --config relay/Caddyfile`（首次自动签证书）→ `relay/smoke.sh https://relay.你的域名 "$RELAY_TOKEN"` 验证 → 把**域名 + token** 给别人（不给真实 key）。
+
+> 默认单 token：所有调用方共用一个 `RELAY_TOKEN`，Caddy 访问日志不区分是谁。要「每用户独立 token / 区分用量 / 单独吊销」，需在 Caddy 前加多 token 表或挂个 Python backend——按需再扩。
 
 ---
 
@@ -177,6 +217,7 @@ wps/
 ├── README.md
 ├── pyproject.toml                  # src 布局 + 依赖；[dev] 含 pytest/ruff
 ├── .env.example                     # 配置模板
+├── relay/                           # [完整] LLM 中转反代（Caddy 单文件，见下「中转反代」节）
 ├── wps/                             # Python 虚拟环境（非源码）
 └── src/wps_tool/
     ├── __init__.py
