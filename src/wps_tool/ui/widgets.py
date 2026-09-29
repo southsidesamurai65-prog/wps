@@ -34,6 +34,33 @@ _DEFAULT_ACTION: dict[str, str] = {
     ".jpeg": "to_pdf",
 }
 
+# 操作 id → 中文显示名（下拉框与表格「操作」列用中文；内部仍传 id）。
+ACTION_LABELS: dict[str, str] = {
+    "extract_text": "提取文本",
+    "analyze_structure": "分析结构",
+    "extract_images": "提取图片",
+    "replace": "替换文本",
+    "replace_tokens": "替换占位符",
+    "split": "拆分 PDF",
+    "rotate": "旋转 PDF",
+    "extract_pages": "抽取页面",
+    "to_images": "转成图片",
+    "to_pdf": "图片转 PDF",
+    "compress": "压缩图片",
+    "encrypt": "加密 PDF",
+    "decrypt": "解密 PDF",
+    "watermark": "加文字水印",
+    "page_numbers": "加页码",
+    "resize": "缩放图片",
+    "convert": "转换格式",
+    "rotate_image": "旋转图片",
+}
+
+
+def action_label(action: str) -> str:
+    """操作 id → 中文显示名（未登记的原样返回）。"""
+    return ACTION_LABELS.get(action, action)
+
 
 def default_action_for(file_path: str) -> str:
     return _DEFAULT_ACTION.get(Path(file_path).suffix.lower(), "extract_text")
@@ -117,7 +144,7 @@ class FileTable(QTableWidget):
             name_item.setData(Qt.ItemDataRole.UserRole, job_id)
             self.setItem(row, 0, name_item)
             self.setItem(row, 1, QTableWidgetItem(ext or "?"))
-            self.setItem(row, 2, QTableWidgetItem(default_action_for(p)))
+            self.setItem(row, 2, QTableWidgetItem(action_label(default_action_for(p))))
             self.setItem(row, 3, QTableWidgetItem("等待中"))
             added.append((job_id, p))
         return added
@@ -138,6 +165,11 @@ class FileTable(QTableWidget):
         if row >= 0:
             self.item(row, 3).setText(status)
 
+    def set_action(self, job_id: str, action_label: str) -> None:
+        row = self.row_for_job(job_id)
+        if row >= 0:
+            self.item(row, 2).setText(action_label)
+
 
 def build_job_func(registry, file_path: str, action: str, options: dict):
     """构造交给 Runner 的 job 函数，签名 func(progress) -> Any。
@@ -157,4 +189,11 @@ def build_job_func(registry, file_path: str, action: str, options: dict):
     return job
 
 
-__all__ = ["DropArea", "FileTable", "build_job_func", "default_action_for"]
+__all__ = [
+    "ACTION_LABELS",
+    "DropArea",
+    "FileTable",
+    "action_label",
+    "build_job_func",
+    "default_action_for",
+]

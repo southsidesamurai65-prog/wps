@@ -62,10 +62,11 @@ def build_beautify_client(settings: Settings) -> PptBeautifyClient | None:
         )
         return None
     logger.info(
-        "PPT 美化客户端准备创建: provider={} model={} base_url={}",
+        "PPT 美化客户端准备创建: provider={} model={} base_url={} reasoning_effort={}",
         settings.llm_provider,
         settings.llm_model,
         settings.llm_base_url,
+        settings.llm_reasoning_effort or "(none)",
     )
     try:
         return PptBeautifyClient(
@@ -73,6 +74,7 @@ def build_beautify_client(settings: Settings) -> PptBeautifyClient | None:
             model=settings.llm_model,
             provider=settings.llm_provider,
             base_url=settings.llm_base_url,
+            reasoning_effort=settings.llm_reasoning_effort,
         )
     except ApiUnavailableError:
         logger.exception(

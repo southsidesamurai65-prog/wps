@@ -43,7 +43,7 @@ from PySide6.QtWidgets import (
 )
 
 from wps_tool.models.settings import Settings
-from wps_tool.ui.widgets import DropArea, FileTable, build_job_func
+from wps_tool.ui.widgets import ACTION_LABELS, DropArea, FileTable, action_label, build_job_func
 from wps_tool.utils.logging import logger
 
 
@@ -62,8 +62,8 @@ class MainWindow(QMainWindow):
         # PPT 美化外部 API 客户端（由 app.py 依配置注入；未启用时为 None）。
         # 为 None 时「美化」按钮只提示未配置，不触发任何网络请求。
         self.beautify_client = beautify_client
-        self.setWindowTitle("WPS 工具 — 本地 Office/PDF 处理")
-        self.resize(960, 760)
+        self.setWindowTitle("WPS 工具箱 — 本地 Office/PDF 处理")
+        self.resize(1180, 880)
 
         self._build_toolbar()
         self._build_central()
@@ -115,23 +115,22 @@ class MainWindow(QMainWindow):
 
         # 第一行：操作 / 输出目录 / 替换映射
         row1 = QHBoxLayout()
-        row1.addWidget(QLabel("操作:"))
+        row1.addWidget(QLabel("功能:"))
         self.action_combo = QComboBox()
-        self.action_combo.addItems(
-            [
-                "extract_text",
-                "analyze_structure",
-                "extract_images",
-                "replace",
-                "replace_tokens",
-                "split",
-                "rotate",
-                "extract_pages",
-                "to_images",
-                "to_pdf",
-                "compress",
-            ]
-        )
+        # 功能按类型分组，显示中文，itemData 存内部 action id。
+        groups: list[list[str]] = [
+            ["extract_text", "split", "rotate", "extract_pages", "to_images",
+             "encrypt", "decrypt", "watermark", "page_numbers"],
+            ["analyze_structure", "extract_images", "replace_tokens"],
+            ["replace"],
+            ["to_pdf", "compress", "resize", "convert", "rotate_image"],
+        ]
+        for gi, group in enumerate(groups):
+            if gi:
+                self.action_combo.insertSeparator(self.action_combo.count())
+            for action in group:
+                self.action_combo.addItem(ACTION_LABELS.get(action, action), action)
+        self.action_combo.setMinimumWidth(140)
         row1.addWidget(self.action_combo)
         row1.addSpacing(12)
         row1.addWidget(QLabel("输出目录:"))
@@ -141,7 +140,7 @@ class MainWindow(QMainWindow):
         row1.addSpacing(12)
         row1.addWidget(QLabel("替换映射:"))
         self.replace_edit = QLineEdit()
-        self.replace_edit.setPlaceholderText("旧文本=新文本（多个用 ; 分隔，仅 replace/replace_tokens 用）")
+        self.replace_edit.setPlaceholderText("旧文本=新文本，多个用 ; 分隔")
         row1.addWidget(self.replace_edit, stretch=1)
         outer.addLayout(row1)
 
@@ -169,11 +168,41 @@ class MainWindow(QMainWindow):
         row2.addSpacing(12)
         row2.addWidget(QLabel("页码:"))
         self.pages_edit = QLineEdit()
-        self.pages_edit.setPlaceholderText(
-            "0,2（0-based，逗号分隔；留空=第1页，仅 extract_pages）"
-        )
+        self.pages_edit.setPlaceholderText("0,2（0-based，逗号分隔；留空=第1页）")
         row2.addWidget(self.pages_edit, stretch=1)
         outer.addLayout(row2)
+
+        # 第二行补充：PDF 加密/水印 + 图片缩放/转换参数（按选用动作生效）
+        row2b = QHBoxLayout()
+        row2b.addWidget(QLabel("密码:"))
+        self.password_edit = QLineEdit()
+        self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_edit.setPlaceholderText("加密/解密用")
+        row2b.addWidget(self.password_edit)
+        row2b.addSpacing(12)
+        row2b.addWidget(QLabel("水印:"))
+        self.watermark_edit = QLineEdit()
+        self.watermark_edit.setPlaceholderText("水印文字（默认 CONFIDENTIAL）")
+        row2b.addWidget(self.watermark_edit, stretch=1)
+        row2b.addSpacing(12)
+        row2b.addWidget(QLabel("宽×高:"))
+        self.width_spin = QSpinBox()
+        self.width_spin.setRange(1, 20000)
+        self.width_spin.setValue(800)
+        row2b.addWidget(self.width_spin)
+        row2b.addWidget(QLabel("×"))
+        self.height_spin = QSpinBox()
+        self.height_spin.setRange(0, 20000)
+        self.height_spin.setValue(0)
+        self.height_spin.setSpecialValueText("自动")
+        self.height_spin.setToolTip("0 = 按宽度等比缩放")
+        row2b.addWidget(self.height_spin)
+        row2b.addSpacing(12)
+        row2b.addWidget(QLabel("格式:"))
+        self.format_combo = QComboBox()
+        self.format_combo.addItems(["png", "jpg", "jpeg", "webp", "bmp"])
+        row2b.addWidget(self.format_combo)
+        outer.addLayout(row2b)
 
         # 第三行：动作按钮
         row3 = QHBoxLayout()
@@ -181,6 +210,9 @@ class MainWindow(QMainWindow):
         self.run_btn.setDefault(True)
         self.run_btn.clicked.connect(self._on_run_selected)
         row3.addWidget(self.run_btn)
+        self.run_all_btn = QPushButton("处理全部")
+        self.run_all_btn.clicked.connect(self._on_run_all)
+        row3.addWidget(self.run_all_btn)
         self.merge_btn = QPushButton("合并选中 PDF")
         self.merge_btn.clicked.connect(self._on_merge_selected)
         row3.addWidget(self.merge_btn)
@@ -197,7 +229,7 @@ class MainWindow(QMainWindow):
         lay = QVBoxLayout(box)
         lay.setContentsMargins(0, 4, 0, 4)
         lay.setSpacing(2)
-        lay.addWidget(QLabel("结果（extract_text / analyze_structure / 路径等）"))
+        lay.addWidget(QLabel("结果（提取文本 / 结构分析 / 输出路径等）"))
         self.result_view = QTextEdit()
         self.result_view.setReadOnly(True)
         self.result_view.setPlaceholderText("处理完成后，结果会显示在这里。")
@@ -249,11 +281,26 @@ class MainWindow(QMainWindow):
         self.result_view.clear()
 
     def _on_run_selected(self) -> None:
-        rows = {i.row() for i in self.table.selectedIndexes()}
+        rows = sorted({i.row() for i in self.table.selectedIndexes()})
         if not rows:
             self.statusBar().showMessage("请先在表格里选中要处理的行。")
             return
-        action = self.action_combo.currentText()
+        self._run_rows(rows)
+
+    def _on_run_all(self) -> None:
+        """对列表里所有文件执行当前操作（批量处理）。"""
+        rows = list(range(self.table.rowCount()))
+        if not rows:
+            self.statusBar().showMessage("列表为空，先拖入文件。")
+            return
+        self._run_rows(rows)
+
+    def _run_rows(self, rows: list[int]) -> None:
+        """对给定行集合提交当前操作的任务（选中行 / 全部共用）。"""
+        action = self.action_combo.currentData()
+        if not action:
+            self.statusBar().showMessage("请先选择一个操作。")
+            return
         raw_out = self.output_edit.text().strip()
         if action in ("replace", "replace_tokens") and not self._parse_mapping(
             self.replace_edit.text()
@@ -262,8 +309,11 @@ class MainWindow(QMainWindow):
                 "请在「替换映射」里填 旧文本=新文本（多个用 ; 分隔）后再处理。"
             )
             return
+        if action in ("encrypt", "decrypt") and not self.password_edit.text():
+            self.statusBar().showMessage("请在「密码」里填密码后再加/解密。")
+            return
         submitted = 0
-        for row in sorted(rows):
+        for row in rows:
             job_id = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
             file_path = self.table.path_for(job_id)
             if not file_path:
@@ -311,6 +361,36 @@ class MainWindow(QMainWindow):
             return {
                 "output": str(Path(out_dir) / f"{stem}_compressed{suffix}"),
                 "quality": self.quality_spin.value(),
+            }
+        if action == "encrypt":
+            return {
+                "output": str(Path(out_dir) / f"{stem}_encrypted.pdf"),
+                "password": self.password_edit.text(),
+            }
+        if action == "decrypt":
+            return {
+                "output": str(Path(out_dir) / f"{stem}_decrypted.pdf"),
+                "password": self.password_edit.text(),
+            }
+        if action == "watermark":
+            return {
+                "output": str(Path(out_dir) / f"{stem}_watermark.pdf"),
+                "text": self.watermark_edit.text().strip() or "CONFIDENTIAL",
+            }
+        if action == "page_numbers":
+            return {"output": str(Path(out_dir) / f"{stem}_numbered.pdf")}
+        if action == "resize":
+            return {
+                "output": str(Path(out_dir) / f"{stem}_resized{suffix}"),
+                "width": self.width_spin.value(),
+                "height": self.height_spin.value() or None,
+            }
+        if action == "convert":
+            return {"output": str(Path(out_dir) / f"{stem}.{self.format_combo.currentText()}")}
+        if action == "rotate_image":
+            return {
+                "output": str(Path(out_dir) / f"{stem}_rotated{suffix}"),
+                "angle": int(self.angle_combo.currentText()),
             }
         if action in ("replace", "replace_tokens"):
             return {
@@ -392,7 +472,8 @@ class MainWindow(QMainWindow):
             logger.warning("PPT 美化未提交: beautify_client=None")
             self.statusBar().showMessage(
                 "美化 LLM 未配置：在 .env 设 ENABLE_API_UPLOAD=true 并填写"
-                " LLM_PROVIDER=openai / LLM_API_KEY（可选 LLM_MODEL）后重启。"
+                " LLM_PROVIDER=opencode-go / LLM_API_KEY（LLM_BASE_URL=/LLM_MODEL"
+                " 可选）后重启。"
             )
             return
         rows = sorted({i.row() for i in self.table.selectedIndexes()})
@@ -457,6 +538,7 @@ class MainWindow(QMainWindow):
 
     def _submit_job(self, job_id: str, file_path: str, action: str, options: dict) -> None:
         job = build_job_func(self.registry, file_path, action, options)
+        self.table.set_action(job_id, action_label(action))
         self.runner.submit(job_id, job)
 
     # ---- Runner 信号回调（在主线程执行） ----

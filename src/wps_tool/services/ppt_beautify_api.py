@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -39,7 +40,11 @@ PNG_MAGIC = b"\x89PNG"
 #: OpenAI Chat Completions 端点（相对 base_url）。
 _CHAT_COMPLETIONS_PATH = "/v1/chat/completions"
 
-#: 当前实现的 LLM 供应商；其它 provider 会抛清晰错。
+#: 当前实现的 LLM 供应商（都是 OpenAI 兼容 Chat Completions）；其它 provider 会抛清晰错。
+#: opencode-go 见 https://opencode.ai/docs/go，base_url 用 https://opencode.ai/zen/go。
+_SUPPORTED_PROVIDERS = {"openai", "opencode-go"}
+
+#: 默认 provider（保持旧行为 / 测试默认）。
 _SUPPORTED_PROVIDER = "openai"
 
 #: EMU per inch（python-pptx 内部长度单位：914400 EMU = 1 英寸）。
@@ -170,14 +175,24 @@ class PptBeautifyClient:
         base_url: str = "https://api.openai.com",
         transport: httpx.BaseTransport | None = None,
         timeout: float = 120,
+        reasoning_effort: str = "",
+        user_agent: str = "wps-tool/0.1",
+        session_id: str | None = None,
     ) -> None:
-        if provider and provider.strip().lower() != _SUPPORTED_PROVIDER:
+        provider = (provider or _SUPPORTED_PROVIDER).strip().lower()
+        if provider not in _SUPPORTED_PROVIDERS:
             raise ApiUnavailableError(
-                f"PPT 美化当前只支持 provider=openai，得到：{provider!r}"
+                "PPT 美化当前只支持 provider ∈ "
+                f"{sorted(_SUPPORTED_PROVIDERS)}，得到：{provider!r}"
             )
         self.api_key = api_key
         self.model = model
-        self.provider = _SUPPORTED_PROVIDER
+        self.provider = provider
+        # 推理强度（low/high/max）；空串表示不发送该字段。
+        self.reasoning_effort = (reasoning_effort or "").strip().lower()
+        # opencode-go 要求自带 user agent + 稳定 session id（用于路由/缓存），否则 400。
+        self.user_agent = user_agent
+        self.session_id = session_id or uuid.uuid4().hex
         # 持有可注入 Client：测试传 transport=httpx.MockTransport(...) 即可离线。
         self._client = httpx.Client(
             base_url=base_url.rstrip("/"),
@@ -185,10 +200,11 @@ class PptBeautifyClient:
             timeout=timeout,
         )
         logger.debug(
-            "PPT 美化客户端初始化: provider={} model={} base_url={} timeout={}",
+            "PPT 美化客户端初始化: provider={} model={} base_url={} reasoning_effort={} timeout={}",
             self.provider,
             self.model,
             str(self._client.base_url).rstrip("/"),
+            self.reasoning_effort or "(none)",
             timeout,
         )
 
@@ -198,14 +214,19 @@ class PptBeautifyClient:
         return self._client
 
     def _auth_headers(self) -> dict[str, str]:
-        return {"Authorization": f"Bearer {self.api_key}"}
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        if self.provider == "opencode-go":
+            # Go 端按 x-opencode-session 优化路由/缓存，并要求非通用 SDK 的 UA。
+            headers["x-opencode-session"] = self.session_id
+            headers["User-Agent"] = self.user_agent
+        return headers
 
     def close(self) -> None:
         self._client.close()
 
     def _call_llm(self, user_prompt: str) -> dict[str, Any]:
         """POST OpenAI Chat Completions，解析返回的 spec JSON。"""
-        body = {
+        body: dict[str, Any] = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": _SYSTEM_PROMPT},
@@ -213,11 +234,15 @@ class PptBeautifyClient:
             ],
             "response_format": {"type": "json_object"},
         }
+        if self.reasoning_effort:
+            body["reasoning_effort"] = self.reasoning_effort
         logger.info(
-            "PPT 美化 LLM 请求准备: method=POST base_url={} endpoint={} model={} prompt_chars={}",
+            "PPT 美化 LLM 请求准备: method=POST base_url={} endpoint={} model={} "
+            "reasoning_effort={} prompt_chars={}",
             str(self._client.base_url).rstrip("/"),
             _CHAT_COMPLETIONS_PATH,
             self.model,
+            self.reasoning_effort or "(none)",
             len(user_prompt),
         )
         try:

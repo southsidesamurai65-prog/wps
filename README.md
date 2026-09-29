@@ -1,62 +1,99 @@
-# WPS Tool — 本地 Office/PDF 处理工具（教学骨架）
+# WPS 工具箱 — 本地 Office/PDF 处理工具
 
-一个本地优先的 Office/PDF 桌面处理工具：尽量在本地处理敏感文件，减少上传第三方网站。支持 `pdf / docx / pptx / 图片` 的常见处理能力，并提供 PySide6 桌面 UI。
+一个本地优先的桌面工具箱（PySide6）：Office/PDF/图片处理尽量在本机完成，减少上传第三方网站；
+仅「PPT 美化」按需调用大模型，且**只发文本**、文档二进制不出本机。
 
-> **教学骨架**：框架（UI、配置、异常、日志、服务胶水）已写好，**核心逻辑留 TODO** 让学生实现，配套**测试即验收标准**——`pytest` 红 → 实现 → 绿。通过实现 TODO 练 Python 工程能力：GUI、文件处理、任务队列、处理器注册、异常处理、配置管理、测试。
+支持 `pdf / docx / pptx / 图片` 的常见处理，拖拽即用，后台执行不卡界面。
 
 ---
 
 ## 功能
 
-- **PDF**：合并、拆分、页面旋转、抽取指定页、转图片、提取文本
-- **DOCX**：提取文本、批量替换（保留 run 样式）
-- **PPTX**：提取文本、提取图片、结构分析（标题页/正文页）、批量替换 token
-- **图片**：多图合成 PDF、压缩
-- **Office 转 PDF**：LibreOffice 命令行封装（DOCX/PPTX → PDF）
+- **PDF**：合并、拆分、旋转、抽取指定页、转图片、提取文本、加密、解密、加文字水印、加页码
+- **Word（DOCX）**：提取文本、批量替换（保留 run 样式）
+- **PPT（PPTX）**：提取文本、提取图片、结构分析、批量替换 token
+- **图片**：多图合成 PDF、压缩、缩放、格式转换、旋转
+- **Office 转 PDF**：LibreOffice 命令行封装（DOCX/PPTX → PDF，需本机装 LibreOffice）
 - **OCR**：扫描版 PDF / 图片文字识别（pytesseract，可选）
-- **PPT 美化**：LLM + 本地渲染——本地解析 pptx 每页 shape 清单（文本 + 图片占位），把清单（**不含图片字节**）发给 LLM（OpenAI，httpx 裸调）拿「shape 级重设计 spec」，再用 python-pptx 按 spec 坐标逐 shape 摆、本地抽图插入，重建一套干净 deck
-- **桌面 UI**：拖拽导入、文件列表、参数区、进度区、后台执行不卡死
-- **中转反代（relay，部署侧）**：可选——Caddy 单文件反代，把真实后端 key 藏在服务器、给调用方发 token；wps_tool 这边零代码改动。见下「中转反代（relay）部署」节。
-
-覆盖范围 M1–M3（本地处理 + 转换 + 美化 API 客户端）。不含 M4 的插件化 / SQLite 任务历史 / CI。
+- **批量处理**：一键对列表里所有文件执行同一操作
+- **PPT 美化**：本地解析每页 shape 清单（文本 + 图片占位）→ 把清单（**不含图片字节**）发给 LLM
+  拿「shape 级重设计 spec」→ 本地用 python-pptx 按 spec 逐 shape 重建一套干净 deck，图片本地抽图插入
+- **桌面 UI**：拖拽导入、文件列表、中文功能下拉、参数区、进度区、结果区，后台执行不卡死
 
 ---
 
 ## 快速开始
 
-环境：Python ≥ 3.11。仓库自带 `./wps` 虚拟环境（Python 3.14，依赖已装）。
+环境：Python ≥ 3.11。仓库自带 `./wps` 虚拟环境（依赖已装）。
 
 ```bash
-# 首次：注册包（src 布局）+ 装 dev 依赖（pytest / ruff）
+# 首次：注册包（src 布局）+ 装开发依赖（pytest / ruff）
 ./wps/bin/python -m pip install -e ".[dev]"
-
-# 看测试 spec 看板（首日基线见下「测试即 spec」）
-./wps/bin/python -m pytest -q
 
 # 启动桌面 UI
 ./wps/bin/python -m wps_tool
 
-# lint
+# 跑测试 / lint（开发用）
+./wps/bin/python -m pytest -q
 ./wps/bin/python -m ruff check src tests
 ```
 
-外部可选依赖（按需）：
-- **LibreOffice / soffice**：Office 转 PDF。未装则转换相关测试 skip。
-- **tesseract** + `pip install pytesseract`：OCR。未装则 OCR 测试 skip。
+外部可选依赖（按需，不装则相关功能/测试自动跳过）：
+
+- **LibreOffice / soffice**：Office 转 PDF。
+- **tesseract** + `pip install pytesseract`：OCR。
 
 ---
 
-## PPT 美化（LLM + 本地渲染）使用方法
+## 界面使用
 
-美化一个 `.pptx`：**本地解析**每页 shape 清单（文本 + 图片占位）→ 把清单（**不含图片字节**，只含文本 + 图片的 `image_id`/位置/尺寸）发给 LLM（OpenAI）拿回「shape 级重设计 spec」→ **本地渲染**重建一套干净 deck（图片从原 pptx 本地抽图、按 `image_id` 插入新位置），写到源文件旁 `processed/`。
+1. 启动后，把文件拖进窗口（或点「打开文件…」）。
+2. 在顶部「功能」下拉里选操作（中文分组：PDF / PPT / Word / 图片）。
+3. 按需填参数区：
+   - **输出目录**：留空 = 源文件旁 `processed/`。
+   - **替换映射**：`旧文本=新文本`，多个用 `;` 分隔（替换类操作用）。
+   - **角度 / 质量 / 倍率 / 页码**：旋转、压缩、渲染、抽页用。
+   - **密码**：PDF 加密/解密用。
+   - **水印**：水印文字，默认 `CONFIDENTIAL`。
+   - **宽×高**：图片缩放，高度填 0 = 按宽度等比。
+   - **格式**：图片转换的目标格式。
+4. 点「**处理选中行**」只跑选中的文件；点「**处理全部**」对列表里所有文件执行同一操作。
+5. 多个 PDF 可点「**合并选中 PDF**」；选中一个 `.pptx` 可点「**美化选中 PPT**」。
+6. 结果与输出路径显示在「结果」区，进度/成败在进度条与状态栏。
 
-> 隐私：pptx 的二进制本体**不出本机**，图片字节也**只留本机内存**。发出本机的只有每页文本 + 图片占位（`image_id`/位置/尺寸）。请求体不含 pptx 的 zip 头 `PK\x03\x04`（`PPTX_MAGIC`），也**不含** PNG 头 `\x89PNG`（`PNG_MAGIC`）——这是写进测试的双隐私断言。若每页文本本身含敏感信息，仍会发给 LLM，请自行评估后再启用。
+批量处理时，每个文件单独生成任务，互不影响；某个文件失败只标红该行，不影响其余任务。
 
-### 流程
+---
 
-1. 本地解析：`_extract_shape_manifest` 拿每页 shape 清单（文本/图片占位）+ 图片 blob 字典（本机）+ 画布尺寸。
-2. 清单 → OpenAI `POST /v1/chat/completions`，`response_format={"type":"json_object"}` 强制 JSON，`Authorization: Bearer {key}`。LLM 既改写文案也定每页 shape 的坐标/尺寸/配色，返回 shape 级 spec。
-3. 本地渲染：`render_beautified_deck(spec, output, style, images=images)` 用 python-pptx 按 spec 坐标逐 shape 摆（rect / rounded_rect / oval / textbox / image），图片按 `image_id` 从本机 `images` 取 blob 插入，`prs.save(output)`。
+## PPT 美化（LLM + 本地渲染）
+
+美化一个 `.pptx`：**本地解析**每页 shape 清单（文本 + 图片占位）→ 把清单发给 LLM
+（OpenAI 兼容 Chat Completions，`response_format=json_object`）拿回「shape 级重设计 spec」→
+**本地渲染**重建一套干净 deck，图片从原 pptx 本地抽图、按 `image_id` 插入新位置。
+
+> 隐私：pptx 二进制本体**不出本机**，图片字节也**只留本机内存**。发出本机的只有每页文本 +
+> 图片占位（`image_id`/位置/尺寸）。若每页文本本身含敏感信息，仍会发给 LLM，请自行评估后再启用。
+
+### 配置（`.env`）
+
+默认关闭。启用示例（默认走 opencode-go 的 DeepSeek V4.1 Flash，推理强度 high）：
+
+```ini
+ENABLE_API_UPLOAD=true
+LLM_PROVIDER=opencode-go
+LLM_API_KEY=你的密钥
+LLM_MODEL=deepseek-v4.1-flash
+LLM_BASE_URL=https://opencode.ai/zen/go
+LLM_REASONING_EFFORT=high
+```
+
+- `ENABLE_API_UPLOAD` 是「允许把内容发出本机」总开关。`false`（默认）→ 不构造美化客户端，
+  点「美化」只提示未配置，**不发任何网络请求**。
+- 支持 `LLM_PROVIDER=openai` / `opencode-go`（均为 OpenAI 兼容端点）；其它 provider 会在
+  构造客户端时报错。也可把 `LLM_BASE_URL` 指向自建/中转的 OpenAI 兼容 endpoint。
+- `LLM_REASONING_EFFORT`（low/high/max，可留空）作为 `reasoning_effort` 发进请求体。
+- opencode-go 要求请求带 `x-opencode-session`（客户端自动生成稳定 session id）与**非通用**
+  `User-Agent`（`wps-tool/0.1`），否则返回 `400 MissingSessionID`——已内置。
 
 ### spec 协议（LLM 返回，shape 级）
 
@@ -81,344 +118,52 @@
 }
 ```
 
-约束：spec 页数 == 源页数（1:1，`beautify_file` 在对不齐时按源 shape 清单兜底补/截，**图片也跟着搬**）；每 shape 有 `type`+`left/top/width/height`（英寸）；`type` 取 `rect`/`rounded_rect`/`oval`/`textbox`/`image`；`image` 用 `image_id` 引用解析阶段给的占位 id；`align`∈left/center/right，`valign`∈top/middle/bottom，`line` null=无线。图片由本地抽图插入，LLM 看不到图片内容、只按占位重新摆位。
-
-### 配置（`.env`）
-
-默认关闭。启用：
-
-```ini
-ENABLE_API_UPLOAD=true
-LLM_PROVIDER=openai
-LLM_API_KEY=你的密钥
-LLM_MODEL=gpt-4o
-LLM_BASE_URL=https://api.openai.com
-```
-
-- `ENABLE_API_UPLOAD` 是「允许把内容发出本机」总开关（LLM 把文本+图片占位发出本机，归它管）。`false`（默认）→ `app.py::build_beautify_client(settings)` 返回 `None`，不构造客户端、不注入 MainWindow；此时点「美化」只提示「未配置」，**不发任何网络请求**。
-- 仅当 `enable_api_upload=true` **且** `llm_configured()`（provider + key 都非空）时才构造 `PptBeautifyClient` 并注入。
-- 当前只实现 `provider=openai`，走 httpx 裸调（不装 `openai` SDK）；其它 provider 在构造时抛 `ApiUnavailableError`。
-- `LLM_MODEL` 可按需配，避免写死过时模型名。
-- `LLM_BASE_URL` 接入点：默认官方 OpenAI；走中转/代理/Azure/自部署的 OpenAI 兼容 endpoint 在这换，**不用改源码**。自建反代（relay）见下「中转反代（relay）部署」节——届时 URL 填 relay 域名、KEY 填 relay 发的 token（不是真实 key）。
-
-### UI 操作步骤
-
-1. 启动 `./wps/bin/python -m wps_tool`，拖一个 `.pptx` 进窗口（或「打开文件…」）。
-2. 在文件表里**选中一行 `.pptx`**（一次只美化一个；选中多行或非 `.pptx` 会提示）。
-3. 点参数区「**美化选中 PPT**」按钮。
-4. 后台执行：调 `client.beautify_file(input, output, style)`——本地解析 shape 清单 + 文本/占位发 OpenAI + 本地渲染重建 deck（含原图搬运）。
-5. 美化后的文件写到「输出目录」（留空则源文件旁 `processed/`）下 `<文件名>_beautified.pptx`，路径显示在「结果」区。
-6. 进度/成败在状态栏与进度区显示；失败经 runner 的 `failed` 信号提示，UI 不崩。
-
-### 隐私说明
-
-- pptx 二进制不出本机，**图片字节也不出本机**（只留本机内存供渲染插入）。发出本机的只有每页文本 + 图片占位（`image_id`/位置/尺寸）。请确认每页文本不含不宜外传的敏感信息后再启用，或先脱敏。
-- 默认关闭（`ENABLE_API_UPLOAD=false`），所有功能本地处理。
-- API Key 只存本地 `.env`（`.gitignore` 已忽略 `.env`）。
-- `tests/test_ppt_beautify_api.py` 把「只发文本+图片占位」写成双隐私断言：请求体**不含** `PPTX_MAGIC`（`PK\x03\x04`，pptx 二进制）也**不含** `PNG_MAGIC`（`\x89PNG`，图片字节），且含 `image_id` 占位、打到 `/v1/chat/completions`、带鉴权、含 `model` 与 `response_format`；并断言产物 deck **含 picture shape**（图被搬过来了，之前美化后图全丢）。
+约束：spec 页数 == 源页数（1:1）；每个 shape 有 `type` + `left/top/width/height`（英寸）；
+`type` 取 `rect`/`rounded_rect`/`oval`/`textbox`/`image`；`image` 用 `image_id` 引用解析阶段
+给的占位 id；页数对不齐时按源 shape 清单兜底补/截（图片也跟着搬）。
 
 ### 程序化使用（不走 UI）
 
 ```python
 from wps_tool.services.ppt_beautify_api import PptBeautifyClient
 
-client = PptBeautifyClient("sk-...", model="gpt-4o")
-# 本地解析 shape 清单 → 文本/图片占位发 OpenAI → 本地渲染重建 deck（含原图搬运）
+client = PptBeautifyClient(
+    "key", model="deepseek-v4.1-flash", provider="opencode-go",
+    base_url="https://opencode.ai/zen/go", reasoning_effort="high",
+)
 client.beautify_file("in.pptx", "out.pptx", style="business")
 client.close()
 ```
 
-测试用 `httpx.MockTransport` 离线注入 transport，handler 回一段 canned chat-completion——**不联网也能跑**。渲染器 `render_beautified_deck` 是纯函数，`tests/test_ppt_renderer.py` 直接驱动、不碰网络。
+渲染器 `render_beautified_deck` 是纯函数（无网络）；测试用 `httpx.MockTransport` 离线注入，
+不联网也能跑。
 
 ---
 
-## 中转反代（relay）部署
+## 配置项（`.env`）
 
-「中转反代」= 别人用 wps_tool（或任何 OpenAI 兼容客户端）时，请求先打到**你自己这台公网服务器**，relay 校验 token 后把 `Authorization` 换成真实后端 key 透传过去——**真实后端 URL + key 只在服务器，调用方只拿到 relay 域名 + relay token**。用 Caddy 单文件搞定 HTTPS + token 校验 + key 注入 + 透传，零 certbot、零 Python；wps_tool 这边零代码改动（它本来就把 `LLM_API_KEY` 当 Bearer 发）。
-
-链路：
-
-```text
-调用方（别人 wps_tool）
-  POST https://relay.你的域名/v1/chat/completions
-  Authorization: Bearer <relay token>        ← 调用方只知道 token
-      │  Caddy @valid 匹配 token → header_up 把 Authorization 换成
-      ▼  Authorization: Bearer <真实 key>     ← 真实 key 只在服务器
-  https://真实后端/v1/chat/completions   （body 原样透传）
-      │  返回 OpenAI envelope（choices[0].message.content）
-      ▼
-  Caddy 原样回给调用方
-```
-
-文件（`relay/`，详见 `relay/README.md`）：
-
-- `Caddyfile` — token 校验（`@valid header`）+ key 注入（`header_up`）+ `reverse_proxy` 透传，无/错 token → 401。
-- `.env.example` — `RELAY_DOMAIN` / `RELAY_TOKEN` / `REAL_KEY` / `REAL_BASE_URL`（真实值不进 git，`.env` 已被 `.gitignore` 忽略）。
-- `README.md` — 前置 / 部署（含 systemd）/ 给别人用 / 安全 / 排错表 / 扩展。
-- `smoke.sh` — 带 token→200 + `choices[0].message.content`、不带/错→401 烟测。
-
-wps_tool 接 relay（零代码改动，只改 `.env`）：
-
-```ini
-ENABLE_API_UPLOAD=true
-LLM_BASE_URL=https://relay.你的域名   # relay 域名（不是真实后端）
-LLM_API_KEY=relay-发给你的-token        # relay token（不是真实 key）
-```
-
-部署速记：服务器装 Caddy → `cp relay/.env.example relay/.env` 填四个值（`RELAY_TOKEN` 用 `openssl rand -hex 32`）→ 域名 A 记录指向服务器、开放 80/443 → `set -a; . relay/.env; set +a; caddy run --config relay/Caddyfile`（首次自动签证书）→ `relay/smoke.sh https://relay.你的域名 "$RELAY_TOKEN"` 验证 → 把**域名 + token** 给别人（不给真实 key）。
-
-> 默认单 token：所有调用方共用一个 `RELAY_TOKEN`，Caddy 访问日志不区分是谁。要「每用户独立 token / 区分用量 / 单独吊销」，需在 Caddy 前加多 token 表或挂个 Python backend——按需再扩。
-
----
-
-## 教学设计：三层 TODO
-
-核心逻辑分三层留 TODO，推荐实现顺序 **a → b → c**。
-
-| 层 | 位置 | 你要实现的 | 已写好的依赖 |
-|---|---|---|---|
-| **(a) 算法** | `processors/{pdf,docx,ppt,image}_processor.py`<br>`services/{ppt_beautify_api,ocr_service}.py` | 文件处理函数体 | 各 `*Processor` 类（分派胶水） |
-| **(b) 调度** | `core/registry.py` | `ProcessorRegistry.get_processor` | `FileProcessor` ABC + 默认 `can_handle` |
-| **(c) 执行器** | `core/task.py` | `TaskRunner.{submit,_worker,cancel,shutdown}` | `TaskSignals` / `Runner` / `SyncTaskRunner`（`core/runner_iface.py`） |
-
-**三层同时是 TODO 却不会卡死**——写好的接口层 + 可注入假实现把依赖隔断：
-
-- (a) 是模块级纯函数，不依赖 (b)(c)，自带可测；
-- (b) 用 `tests/_fakes.py::FakeProcessor` 注入即可独立测，不需任何真实处理器；
-- (c) 用 `tests/_fakes.py::fake_job` 即可独立测，不需 Registry；
-- UI 在 (c) 未实现时用 `SyncTaskRunner` 兜底也能端到端跑通。
-
-「a → b → c」是**学习节奏**，不是硬前置——任一时刻你只面对一层红测试。`core/runner_iface.py::SyncTaskRunner` 就是 `TaskRunner` 的同步参考答案，实现 (c) 时可直接对照。
-
-每个 TODO 桩统一 `raise NotImplementedError`（**不返回默认值**，避免 `isinstance(result, str)` 之类弱断言假绿），并配中文 docstring：`[学习]` 目标 + 契约 + `提示:` 关键 API。
-
----
-
-## 测试即 spec
-
-`tests/` 每个文件是对应 TODO 的验收 spec。夹具在 `tests/conftest.py` 用代码现场造「内容已知」的小样例（fitz / python-docx / python-pptx / PIL / pypdf），**不 ship 二进制**——文件里有什么就是夹具代码本身，不实现任何 TODO 夹具也能正常生成。
-
-| 测试 | 首日 | 说明 |
+| 变量 | 默认 | 说明 |
 |---|---|---|
-| `test_pdf/docx/ppt/image_processor.py`<br>`test_registry.py`<br>`test_task_runner.py`（除 smoke）<br>`test_ppt_beautify_api.py` | 红 | `NotImplementedError`，实现到对应测试转绿 |
-| `test_task_runner.py::test_sync_task_runner_smoke` | 绿 | 证明接口 / 夹具本身无误的基线 |
-| `test_office_convert.py` | skip | 未装 LibreOffice/soffice 时跳过，不假红 |
-| `test_ocr.py` | skip | 未装 tesseract / pytesseract 时跳过 |
-| `test_integration.py` | xfail | 三层未齐时自动 xfail，三层齐了自动转绿（XPASS） |
+| `ENABLE_API_UPLOAD` | `false` | 是否允许把内容发出本机（PPT 美化用）。 |
+| `LLM_PROVIDER` | `openai` | `openai` / `opencode-go`。 |
+| `LLM_API_KEY` | 空 | LLM 密钥。 |
+| `LLM_MODEL` | `gpt-4o` | 模型名。 |
+| `LLM_BASE_URL` | `https://api.openai.com` | OpenAI 兼容接入点。 |
+| `LLM_REASONING_EFFORT` | 空 | 推理强度 low/high/max。 |
+| `DEFAULT_OUTPUT_DIR` | 空 | 默认输出目录；空 = 源文件旁 `processed/`。 |
+| `TASK_MAX_WORKERS` | `2` | 后台并发数。 |
 
-首日全量 `pytest` 全红是**预期且信息性的**——它就是 spec 看板。真正要避免的「假红」只有环境缺二进制，故 LibreOffice/tesseract 一律 skip。
-
----
-
-## 项目结构
-
-```text
-wps/
-├── README.md
-├── pyproject.toml                  # src 布局 + 依赖；[dev] 含 pytest/ruff
-├── .env.example                     # 配置模板
-├── relay/                           # [完整] LLM 中转反代（Caddy 单文件，见下「中转反代」节）
-├── wps/                             # Python 虚拟环境（非源码）
-└── src/wps_tool/
-    ├── __init__.py
-    ├── app.py                       # [完整] QApplication 启动 + 装配 Registry/Runner/MainWindow
-    ├── core/
-    │   ├── errors.py                # [完整] 统一异常体系
-    │   ├── runner_iface.py          # [完整] TaskSignals / Runner Protocol / SyncTaskRunner（接口层）
-    │   ├── registry.py              # [TODO·b] ProcessorRegistry.get_processor
-    │   └── task.py                  # [TODO·c] TaskRunner
-    ├── processors/
-    │   ├── __init__.py              # [完整] register_default_processors()
-    │   ├── base.py                  # [完整] FileProcessor ABC + 默认 can_handle
-    │   ├── pdf_processor.py         # [TODO·a] merge/split/rotate/extract_pages/to_images/extract_text
-    │   ├── docx_processor.py        # [TODO·a] extract_text/replace_text
-    │   ├── ppt_processor.py         # [TODO·a] extract_text/extract_images/analyze_structure/replace_tokens
-    │   └── image_processor.py       # [TODO·a] images_to_pdf/compress_image
-    ├── services/
-    │   ├── office_convert.py        # [完整] LibreOffice 子进程封装 + 可用性检测
-    │   ├── ppt_beautify_api.py      # [完整] PptBeautifyClient：本地解析 shape 清单→LLM shape spec→本地渲染（隐私：只发文本+图片占位，字节不出本机）
-    │   ├── ppt_renderer.py          # [完整] render_beautified_deck（按 spec 坐标逐 shape 摆 + 本地抽图插入，纯函数无网络）
-    │   └── ocr_service.py           # [TODO·a] ocr_image（pytesseract）
-    ├── models/
-    │   ├── file_job.py              # [完整] FileJob dataclass + JobStatus 枚举
-    │   └── settings.py              # [完整] pydantic-settings 配置
-    ├── ui/
-    │   ├── main_window.py           # [完整] 主窗口骨架
-    │   ├── widgets.py               # [完整] DropArea / FileTable / build_job_func
-    │   └── theme.py                 # [完整] QSS
-    └── utils/
-        ├── paths.py                 # [完整] 输出目录（源旁 processed/）
-        └── logging.py               # [完整] loguru + 隐私脱敏 filter
-tests/
-├── conftest.py                      # [完整] qapp + 现场生成样例夹具
-├── _fakes.py                        # [完整] FakeProcessor / fake_job（测试替身）
-└── test_*.py                        # [测试] 各 TODO 的 spec（见上表）
-```
-
-设计原则：`ui/` 只负责界面，不直接处理文件；`processors/` 负责具体文件操作；`services/` 负责外部能力（LibreOffice / OCR / 美化 API）；`core/` 负任务调度、处理器注册、统一异常；`models/` 放配置与任务数据结构；`utils/` 放路径与日志。
+`.env` 已被 `.gitignore` 忽略；模板见 `.env.example`。
 
 ---
 
-## TODO 清单与学习目标
+## 隐私说明
 
-按推荐顺序，每实现一组对应测试转绿。
-
-### Layer (a) 文件处理算法
-
-| 文件 | TODO 函数 | 学什么 |
-|---|---|---|
-| `pdf_processor.py` | `extract_pdf_text` | PyMuPDF 读文本（最简，建议先做） |
-| | `merge_pdfs` `split_pdf` | pypdf 读写、页操作 |
-| | `rotate_pdf` `extract_pdf_pages` | pypdf 页旋转 / 抽取 |
-| | `pdf_to_images` | PyMuPDF 渲染为图片 |
-| `docx_processor.py` | `extract_docx_text` | python-docx 读段落 |
-| | `replace_docx_text` | 遍历 run 替换（保样式，抓 `paragraph.text=` 丢 run 的坑） |
-| `ppt_processor.py` | `extract_pptx_text` | python-pptx 遍历 shapes/text_frame |
-| | `extract_pptx_images` | `MSO_SHAPE_TYPE.PICTURE` + `shape.image.blob` |
-| | `analyze_pptx_structure` | 用 `slide_layout.name` 判页型 |
-| | `replace_pptx_tokens` | 遍历 run 替换 |
-| `image_processor.py` | `images_to_pdf` `compress_image` | Pillow 多图合 PDF / 压缩 |
-| `ppt_beautify_api.py` | `beautify_file` | httpx + OpenAI chat-completions、本地解析 shape 清单→LLM shape spec→本地渲染（隐私：只发文本+图片占位，字节不出本机） |
-| `ocr_service.py` | `ocr_image` | pytesseract 调用 |
-
-### Layer (b) 处理器注册调度
-
-| 文件 | TODO | 学什么 |
-|---|---|---|
-| `core/registry.py` | `ProcessorRegistry.get_processor` | 注册表 + 策略模式：遍历、`can_handle` 命中分派 |
-
-### Layer (c) 任务执行器
-
-| 文件 | TODO | 学什么 |
-|---|---|---|
-| `core/task.py` | `TaskRunner.submit` | `ThreadPoolExecutor` 提交、立即返回 job_id |
-| | `TaskRunner._worker` | worker 线程执行 + Qt 信号回调（finished/failed） |
-| | `TaskRunner.cancel` `shutdown` | 取消排队任务、关闭线程池 |
-
-> `*Processor.run`（分派胶水）和 `core/runner_iface.py` 全套已写好，**不要改**——它们是你 TODO 的调用方与接口契约。
+- 默认所有功能本地处理；只有开启 `ENABLE_API_UPLOAD` 才会调用 LLM。
+- PPT 美化只发每页文本 + 图片占位（`image_id`/位置/尺寸），pptx 与图片字节都不出本机。
+- 日志脱敏（手机号/邮箱等替换为占位符）；API Key 只存本地 `.env`。
 
 ---
-
-## 库 API 速查
-
-详细签名与提示见各 TODO 的 docstring。以下是按已装版本核对的坑点。
-
-### pypdf（PDF 读写）
-
-```python
-from pypdf import PdfReader, PdfWriter
-
-# 合并：append 保书签；也可 add_page 循环
-writer = PdfWriter()
-for p in input_paths:
-    writer.append(PdfReader(p))
-with open(output_path, "wb") as f:
-    writer.write(f)
-
-# 旋转：page.rotate(angle) 原地修改，须加到新 writer
-reader = PdfReader(input_path)
-writer = PdfWriter()
-for page in reader.pages:
-    page.rotate(90)
-    writer.add_page(page)
-
-# 加密：方法名是 encrypt，没有 add_encryption（PyPDF2 旧名）
-writer.encrypt(user_password="pw", use_128bit=True)
-
-# 解密读：is_encrypted 为 True 时须先 decrypt
-reader = PdfReader(path)
-if reader.is_encrypted:
-    reader.decrypt("pw")
-```
-
-### PyMuPDF / fitz（渲染、文本）
-
-```python
-import fitz
-
-doc = fitz.open(input_path)
-for i, page in enumerate(doc, start=1):
-    pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0))  # zoom
-    pix.save(f"{output_dir}/page_{i}.png")               # 按扩展名定格式
-    text = page.get_text()                                # 返回 str
-```
-
-### python-docx（DOCX）
-
-```python
-from docx import Document
-
-doc = Document(path)
-text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
-
-# 替换：必须遍历 run，不能 paragraph.text = ...（会丢 run 样式）
-for para in doc.paragraphs:
-    for run in para.runs:
-        for old, new in mapping.items():
-            run.text = run.text.replace(old, new)
-```
-
-### python-pptx（PPTX）
-
-```python
-from pptx import Presentation
-from pptx.enum.shapes import MSO_SHAPE_TYPE
-
-prs = Presentation(path)
-for slide in prs.slides:
-    for shape in slide.shapes:
-        if shape.has_text_frame:          # 避免对 Group/GraphicFrame 误访问 .text
-            ... = shape.text_frame.text
-        if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
-            blob = shape.image.blob        # bytes
-            ext = shape.image.ext          # "png" / "jpeg"
-    layout_name = slide.slide_layout.name # "Title Slide" / "Title and Content" ...
-```
-
-### httpx（PPT 美化：OpenAI Chat Completions）
-
-```python
-import httpx
-
-# 客户端必须持有「可注入 transport 的 Client」才能离线测
-client = httpx.Client(base_url="https://api.openai.com", transport=transport, timeout=120)
-r = client.post(
-    "/v1/chat/completions",
-    json={"model": "gpt-4o", "messages": [...], "response_format": {"type": "json_object"}},
-    headers={"Authorization": f"Bearer {key}"},
-)
-r.raise_for_status()
-spec = r.json()["choices"][0]["message"]["content"]  # JSON 字符串，再 json.loads
-
-# 离线测试用 MockTransport，handler 回 canned chat-completion
-transport = httpx.MockTransport(lambda req: httpx.Response(
-    200, json={"choices": [{"message": {"content": spec_json_str}}]}))
-```
-
-`PPTX_MAGIC = b"PK\x03\x04"`（pptx 的 zip 头）、`PNG_MAGIC = b"\x89PNG"`（PNG 头）：美化只发每页文本 + 图片占位（`image_id`/位置/尺寸），**请求体不应含二者**——图片 blob 留本机内存供渲染插入。据此写成双隐私断言。本地渲染产物则**应**以 `PPTX_MAGIC` 开头（合法 pptx zip）。
-
-### Pillow（图片）
-
-```python
-from PIL import Image
-
-# 多图合 PDF：所有图须 convert("RGB")，否则 RGBA/P 转 PDF 抛错
-imgs = [Image.open(p).convert("RGB") for p in image_paths]
-imgs[0].save(output_path, save_all=True, append_images=imgs[1:])
-
-# 压缩
-Image.open(input_path).convert("RGB").save(output_path, optimize=True, quality=85)
-```
-
----
-
-## 设计原则
-
-- **本地优先**：默认所有功能本地处理；外部 API 功能默认关闭（`ENABLE_API_UPLOAD=false`）。
-- **隐私从第一天起**：日志脱敏 filter（手机号/邮箱替换为占位号）；本地任务历史只记文件名/时间/操作/结果，不记正文；API 请求失败不把文件内容写进错误日志。
-- **处理器注册机制**：每类文件处理器实现统一接口（`can_handle` + `run`），新增类型不污染主界面。
-- **后台任务不卡死**：UI 只经 `TaskSignals` 回调更新界面，worker 线程绝不直接碰 QWidget；`TaskSignals` 在主线程构造，worker emit 的信号被 Qt 自动判为 Queued 连接。
-- **配置管理**：`pydantic-settings` 从 `.env` / 环境变量读，API Key、路径、隐私开关集中管理。
 
 ## 技术栈
 
@@ -426,7 +171,7 @@ Image.open(input_path).convert("RGB").save(output_path, optimize=True, quality=8
 |---|---|
 | 桌面 UI | PySide6 |
 | PDF 读写 | pypdf |
-| PDF 渲染/文本 | PyMuPDF (fitz) |
+| PDF 渲染/文本/水印/页码 | PyMuPDF (fitz) |
 | DOCX | python-docx |
 | PPTX | python-pptx |
 | Office 转 PDF | LibreOffice 命令行 |
@@ -436,8 +181,25 @@ Image.open(input_path).convert("RGB").save(output_path, optimize=True, quality=8
 | 配置 | pydantic-settings |
 | 日志 | loguru |
 | 测试 / lint | pytest / ruff |
-| 打包 | PyInstaller（M4，未覆盖） |
 
-## 后续（M4，未覆盖）
+---
 
-插件化文件处理器、SQLite 任务历史、批处理模板、文件脱敏规则、PyInstaller 打包、CI——这些不在当前教学骨架范围内，可作为进阶练习。
+## 项目结构
+
+```text
+wps/
+├── pyproject.toml
+├── .env.example
+└── src/wps_tool/
+    ├── app.py              # 启动 + 装配配置/注册表/执行器/主窗口
+    ├── core/               # 注册表、任务执行器、异常、接口
+    ├── processors/         # 各格式处理算法（pdf/docx/ppt/image）
+    ├── services/           # 外部能力（LibreOffice / OCR / 美化 API / 渲染器）
+    ├── models/             # 配置 + FileJob
+    ├── ui/                 # 主窗口、组件、主题样式
+    └── utils/              # 路径、日志
+tests/                      # pytest 测试
+```
+
+设计原则：`ui/` 只管界面；`processors/` 管文件操作；`services/` 管外部能力；
+`core/` 管调度与异常；`models/` 放配置与数据结构；`utils/` 放路径与日志。

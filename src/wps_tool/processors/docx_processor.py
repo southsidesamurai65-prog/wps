@@ -16,10 +16,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from docx import Document
+
 from wps_tool.core.errors import UnsupportedActionError
 from wps_tool.processors.base import FileProcessor
-
-from docx import Document
 
 
 def extract_docx_text(input_path: str) -> str:

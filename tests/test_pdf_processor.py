@@ -8,10 +8,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import fitz
 from PIL import Image
 from pypdf import PdfReader
 
 from wps_tool.processors.pdf_processor import (
+    add_page_numbers,
+    add_watermark,
+    decrypt_pdf,
+    encrypt_pdf,
     extract_pdf_pages,
     extract_pdf_text,
     merge_pdfs,
@@ -67,4 +72,36 @@ def test_extract_pdf_text_multipage(sample_pdf_multipage):
     text = extract_pdf_text(str(sample_pdf_multipage))
     for page_text in ("PAGE_A", "PAGE_B", "PAGE_C"):
         assert page_text in text
+
+
+def test_encrypt_and_decrypt_pdf(sample_pdf, tmp_output_dir):
+    enc = tmp_output_dir / "enc.pdf"
+    encrypt_pdf(str(sample_pdf), str(enc), user_password="pw")
+    assert PdfReader(str(enc)).is_encrypted
+
+    dec = tmp_output_dir / "dec.pdf"
+    decrypt_pdf(str(enc), str(dec), "pw")
+    reader = PdfReader(str(dec))
+    assert not reader.is_encrypted
+    assert "Hello PDF World" in reader.pages[0].extract_text()
+
+
+def test_add_watermark(sample_pdf_multipage, tmp_output_dir):
+    out = tmp_output_dir / "wm.pdf"
+    add_watermark(str(sample_pdf_multipage), str(out), "CONFIDENTIAL")
+    assert out.exists()
+    doc = fitz.open(str(out))
+    assert len(doc) == 3
+    assert "CONFIDENTIAL" in doc[0].get_text()
+    doc.close()
+
+
+def test_add_page_numbers(sample_pdf_multipage, tmp_output_dir):
+    out = tmp_output_dir / "numbered.pdf"
+    add_page_numbers(str(sample_pdf_multipage), str(out))
+    doc = fitz.open(str(out))
+    assert len(doc) == 3
+    text = doc[2].get_text()
+    assert "3" in text
+    doc.close()
 

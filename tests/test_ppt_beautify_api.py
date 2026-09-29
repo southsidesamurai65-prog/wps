@@ -115,6 +115,42 @@ def test_unsupported_provider_raises():
         PptBeautifyClient("key", model="gpt-4o", provider="gemini")
 
 
+def test_opencode_go_provider_and_reasoning_effort(sample_pptx, tmp_output_dir):
+    """opencode-go 是 OpenAI 兼容端点：base_url + reasoning_effort 正确发出。"""
+    captured: dict = {}
+    out = tmp_output_dir / "beautified.pptx"
+    transport = httpx.MockTransport(_chat_completion_handler(captured))
+    client = PptBeautifyClient(
+        "key",
+        model="deepseek-v4.1-flash",
+        provider="opencode-go",
+        base_url="https://opencode.ai/zen/go",
+        reasoning_effort="high",
+        transport=transport,
+    )
+
+    client.beautify_file(str(sample_pptx), str(out))
+
+    assert captured["request"].url.path == "/zen/go/v1/chat/completions"
+    assert captured["body"]["model"] == "deepseek-v4.1-flash"
+    assert captured["body"]["reasoning_effort"] == "high"
+    # opencode-go 要求自带 session id + 非通用 UA，否则 400 MissingSessionID
+    assert captured["request"].headers["x-opencode-session"]
+    assert captured["request"].headers["user-agent"] == "wps-tool/0.1"
+    client.close()
+
+
+def test_reasoning_effort_omitted_when_empty(sample_pptx, tmp_output_dir):
+    captured: dict = {}
+    transport = httpx.MockTransport(_chat_completion_handler(captured))
+    client = PptBeautifyClient("key", model="gpt-4o", transport=transport)
+
+    client.beautify_file(str(sample_pptx), str(tmp_output_dir / "o.pptx"))
+
+    assert "reasoning_effort" not in captured["body"]
+    client.close()
+
+
 def test_build_beautify_client_uses_llm_base_url():
     """app.py 装配：LLM_BASE_URL 真传进 client.base_url（不写死）。
 

@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     llm_api_key: str = ""                 # 从 .env 的 LLM_API_KEY 读
     llm_model: str = "gpt-4o"             # 从 .env 的 LLM_MODEL 读，避免写死过时模型名
     llm_base_url: str = "https://api.openai.com"  # 从 .env 的 LLM_BASE_URL 读；换中转/Azure/自部署 endpoint 在这
+    llm_reasoning_effort: str = ""        # 推理强度（low/high/max）；留空则不带该字段
 
     def llm_configured(self) -> bool:
         """PPT 美化 LLM 是否已配置（provider + key 都非空）。"""

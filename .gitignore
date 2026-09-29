@@ -38,3 +38,6 @@ htmlcov/
 *.pptx
 *.docx
 *.pdf
+
+# ---- 处理产物（默认输出目录）----
+processed/

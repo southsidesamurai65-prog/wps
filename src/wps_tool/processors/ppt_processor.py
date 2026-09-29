@@ -19,11 +19,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from wps_tool.core.errors import UnsupportedActionError
-from wps_tool.processors.base import FileProcessor
-
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+from wps_tool.core.errors import UnsupportedActionError
+from wps_tool.processors.base import FileProcessor
 
 
 def extract_pptx_text(input_path: str) -> list[dict]:

@@ -159,6 +159,109 @@ def extract_pdf_text(input_path: str) -> str:
     raise NotImplementedError("TODO(Layer a): 实现 extract_pdf_text")
 
 
+# ===== 扩展功能：加密 / 解密 / 水印 / 页码 =====
+
+
+def encrypt_pdf(
+    input_path: str,
+    output_path: str,
+    user_password: str,
+    owner_password: str | None = None,
+) -> str:
+    """给 PDF 加密码，返回 output_path。
+
+    契约：把每页复制进新 writer，``writer.encrypt(user_password, owner_password)``
+    （owner_password 留空则与 user_password 相同），写出到 output_path。
+    """
+    reader = PdfReader(input_path)
+    writer = PdfWriter()
+    for page in reader.pages:
+        writer.add_page(page)
+    writer.encrypt(
+        user_password=user_password,
+        owner_password=owner_password or user_password,
+    )
+    with open(output_path, "wb") as f:
+        writer.write(f)
+    return output_path
+
+
+def decrypt_pdf(input_path: str, output_path: str, password: str) -> str:
+    """去掉 PDF 密码（用给定密码解密后重写），返回 output_path。
+
+    契约：``reader.is_encrypted`` 为真时先 ``reader.decrypt(password)``，
+    再把解密后的页写进不带加密的新 writer。
+    """
+    reader = PdfReader(input_path)
+    if reader.is_encrypted:
+        reader.decrypt(password)
+    writer = PdfWriter()
+    for page in reader.pages:
+        writer.add_page(page)
+    with open(output_path, "wb") as f:
+        writer.write(f)
+    return output_path
+
+
+def add_watermark(
+    input_path: str,
+    output_path: str,
+    text: str,
+    *,
+    font_size: float = 48,
+    opacity: float = 0.25,
+    angle: int = 45,
+) -> str:
+    """给每页叠加半透明文字水印（默认斜 45°），返回 output_path。
+
+    用 fitz 的 ``fill_opacity`` + ``morph``（绕页面中心旋转）实现斜体水印；
+    ``angle`` 取 0 时水平居中。文字是真实文本，可被 ``get_text()`` 提取。
+    """
+    doc = fitz.open(input_path)
+    for page in doc:
+        rect = page.rect
+        width = fitz.get_text_length(text, fontsize=font_size)
+        start = fitz.Point((rect.width - width) / 2, rect.height / 2)
+        pivot = fitz.Point(rect.width / 2, rect.height / 2)
+        # rotate 只接受 90 的倍数，任意角度用 morph(绕 pivot 的旋转矩阵)
+        page.insert_text(
+            start,
+            text,
+            fontsize=font_size,
+            color=(0.6, 0.6, 0.6),
+            fill_opacity=opacity,
+            morph=(pivot, fitz.Matrix(angle)) if angle else None,
+        )
+    doc.save(output_path)
+    doc.close()
+    return output_path
+
+
+def add_page_numbers(
+    input_path: str,
+    output_path: str,
+    *,
+    start: int = 1,
+    font_size: float = 11,
+    margin: float = 28,
+) -> str:
+    """在每页底部居中加页码（从 start 起），返回 output_path。"""
+    doc = fitz.open(input_path)
+    for i, page in enumerate(doc, start=start):
+        rect = page.rect
+        label = str(i)
+        width = fitz.get_text_length(label, fontsize=font_size)
+        page.insert_text(
+            fitz.Point((rect.width - width) / 2, rect.height - margin / 2),
+            label,
+            fontsize=font_size,
+            color=(0.2, 0.2, 0.2),
+        )
+    doc.save(output_path)
+    doc.close()
+    return output_path
+
+
 # ===== 已写好：PdfProcessor 分派胶水（学生不要改） =====
 
 
@@ -184,12 +287,39 @@ class PdfProcessor(FileProcessor):
                 )
             case "extract_text":
                 return extract_pdf_text(file_path)
+            case "encrypt":
+                return encrypt_pdf(
+                    file_path,
+                    options["output"],
+                    options["password"],
+                    options.get("owner_password"),
+                )
+            case "decrypt":
+                return decrypt_pdf(file_path, options["output"], options["password"])
+            case "watermark":
+                return add_watermark(
+                    file_path,
+                    options["output"],
+                    options.get("text") or "CONFIDENTIAL",
+                    font_size=options.get("font_size", 48),
+                    opacity=options.get("opacity", 0.25),
+                )
+            case "page_numbers":
+                return add_page_numbers(
+                    file_path,
+                    options["output"],
+                    start=options.get("start", 1),
+                )
             case _:
                 raise UnsupportedActionError(f"PdfProcessor 不支持操作: {action}")
 
 
 __all__ = [
     "PdfProcessor",
+    "add_page_numbers",
+    "add_watermark",
+    "decrypt_pdf",
+    "encrypt_pdf",
     "extract_pdf_pages",
     "extract_pdf_text",
     "merge_pdfs",
