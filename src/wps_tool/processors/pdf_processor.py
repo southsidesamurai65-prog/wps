@@ -266,6 +266,18 @@ def add_page_numbers(
     return output_path
 
 
+def _xml_safe(text: str) -> str:
+    """去掉 XML 1.0 不允许的字符（控制字符/半区代理），否则 python-docx 会抛 ValueError。"""
+    return "".join(
+        ch
+        for ch in text
+        if ch in "\t\n\r"
+        or 0x20 <= ord(ch) <= 0xD7FF
+        or 0xE000 <= ord(ch) <= 0xFFFD
+        or 0x10000 <= ord(ch) <= 0x10FFFF
+    )
+
+
 def pdf_to_docx(input_path: str, output_path: str, *, include_images: bool = True) -> str:
     """把 PDF 转成 Word（.docx），返回 output_path。
 
@@ -282,11 +294,15 @@ def pdf_to_docx(input_path: str, output_path: str, *, include_images: bool = Tru
                 continue
             for line in block.get("lines", []):
                 spans = line.get("spans", [])
-                if not "".join(s.get("text", "") for s in spans).strip():
+                # PDF 文本层可能夹带控制字符，先清洗成 XML 允许的文本再写 docx。
+                texts = [_xml_safe(s.get("text", "")) for s in spans]
+                if not "".join(texts).strip():
                     continue
                 para = doc.add_paragraph()
-                for span in spans:
-                    run = para.add_run(span.get("text", ""))
+                for span, text in zip(spans, texts):
+                    if not text:
+                        continue
+                    run = para.add_run(text)
                     size = span.get("size")
                     if size:
                         run.font.size = Pt(round(float(size), 1))

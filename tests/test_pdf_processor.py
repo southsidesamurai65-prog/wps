@@ -117,3 +117,21 @@ def test_pdf_to_docx(sample_pdf_multipage, tmp_output_dir):
     for page_text in ("PAGE_A", "PAGE_B", "PAGE_C"):
         assert page_text in text
 
+
+def test_pdf_to_docx_skips_control_chars(tmp_path, tmp_output_dir):
+    """回归：PDF 文本层含 \\x00/\\x01 等控制字符时不能抛 XML 兼容错误。"""
+    from docx import Document
+
+    src = tmp_path / "ctrl.pdf"
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "A\x01B")
+    page.insert_text((72, 100), "C\x00D")
+    doc.save(str(src))
+    doc.close()
+
+    out = tmp_output_dir / "ctrl.docx"
+    pdf_to_docx(str(src), str(out))
+    text = "\n".join(p.text for p in Document(str(out)).paragraphs)
+    assert "AB" in text and "CD" in text
+
