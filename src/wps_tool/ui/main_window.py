@@ -25,6 +25,7 @@ import contextlib
 from pathlib import Path
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
@@ -117,20 +118,8 @@ class MainWindow(QMainWindow):
         row1 = QHBoxLayout()
         row1.addWidget(QLabel("功能:"))
         self.action_combo = QComboBox()
-        # 功能按类型分组，显示中文，itemData 存内部 action id。
-        groups: list[list[str]] = [
-            ["extract_text", "split", "rotate", "extract_pages", "to_images",
-             "encrypt", "decrypt", "watermark", "page_numbers"],
-            ["analyze_structure", "extract_images", "replace_tokens"],
-            ["replace"],
-            ["to_pdf", "compress", "resize", "convert", "rotate_image"],
-        ]
-        for gi, group in enumerate(groups):
-            if gi:
-                self.action_combo.insertSeparator(self.action_combo.count())
-            for action in group:
-                self.action_combo.addItem(ACTION_LABELS.get(action, action), action)
-        self.action_combo.setMinimumWidth(140)
+        self._populate_actions()
+        self.action_combo.setMinimumWidth(170)
         row1.addWidget(self.action_combo)
         row1.addSpacing(12)
         row1.addWidget(QLabel("输出目录:"))
@@ -222,6 +211,38 @@ class MainWindow(QMainWindow):
         row3.addStretch(1)
         outer.addLayout(row3)
         return box
+
+    def _populate_actions(self) -> None:
+        """按文档类型分区填充功能下拉（分区标题不可选，内部仍存 action id）。"""
+        groups: list[tuple[str, list[str]]] = [
+            ("通用（PDF / Word / PPT）", ["extract_text"]),
+            ("PDF 功能", [
+                "to_word", "split", "rotate", "extract_pages", "to_images",
+                "encrypt", "decrypt", "watermark", "page_numbers",
+            ]),
+            ("PPT 功能", ["analyze_structure", "extract_images", "replace_tokens"]),
+            ("Word 功能", ["replace"]),
+            ("图片功能", ["to_pdf", "compress", "resize", "convert", "rotate_image"]),
+        ]
+        model = QStandardItemModel(self.action_combo)
+        first_action_row = -1
+        for title, actions in groups:
+            header = QStandardItem(title)
+            header.setFlags(Qt.ItemFlag.NoItemFlags)  # 分区标题不可选
+            font = header.font()
+            font.setBold(True)
+            header.setFont(font)
+            header.setForeground(QColor("#8a93a3"))
+            model.appendRow(header)
+            for action in actions:
+                item = QStandardItem(ACTION_LABELS.get(action, action))
+                item.setData(action, Qt.ItemDataRole.UserRole)
+                model.appendRow(item)
+                if first_action_row < 0:
+                    first_action_row = model.rowCount() - 1
+        self.action_combo.setModel(model)
+        if first_action_row >= 0:
+            self.action_combo.setCurrentIndex(first_action_row)
 
     def _build_result(self) -> QWidget:
         """结果查看区：extract_text / analyze_structure 等返回的内容显示在这里。"""
@@ -343,6 +364,8 @@ class MainWindow(QMainWindow):
         suffix = Path(file_path).suffix
         if action in ("split", "extract_images"):
             return {"output_dir": out_dir}
+        if action == "to_word":
+            return {"output": str(Path(out_dir) / f"{stem}.docx")}
         if action == "to_images":
             return {"output_dir": out_dir, "zoom": self.zoom_spin.value()}
         if action == "rotate":

@@ -20,6 +20,7 @@ from wps_tool.processors.pdf_processor import (
     extract_pdf_pages,
     extract_pdf_text,
     merge_pdfs,
+    pdf_to_docx,
     pdf_to_images,
     rotate_pdf,
     split_pdf,
@@ -104,4 +105,15 @@ def test_add_page_numbers(sample_pdf_multipage, tmp_output_dir):
     text = doc[2].get_text()
     assert "3" in text
     doc.close()
+
+
+def test_pdf_to_docx(sample_pdf_multipage, tmp_output_dir):
+    from docx import Document
+
+    out = tmp_output_dir / "converted.docx"
+    pdf_to_docx(str(sample_pdf_multipage), str(out))
+    assert out.exists()
+    text = "\n".join(p.text for p in Document(str(out)).paragraphs)
+    for page_text in ("PAGE_A", "PAGE_B", "PAGE_C"):
+        assert page_text in text
 

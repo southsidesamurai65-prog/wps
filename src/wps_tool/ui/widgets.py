@@ -43,6 +43,7 @@ ACTION_LABELS: dict[str, str] = {
     "replace_tokens": "替换占位符",
     "split": "拆分 PDF",
     "rotate": "旋转 PDF",
+    "to_word": "PDF 转 Word",
     "extract_pages": "抽取页面",
     "to_images": "转成图片",
     "to_pdf": "图片转 PDF",

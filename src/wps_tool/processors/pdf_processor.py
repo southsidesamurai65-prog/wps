@@ -18,13 +18,17 @@ PdfProcessor 类已写好当分派胶水，学生不要改它。
 
 from __future__ import annotations
 
+from io import BytesIO
 from typing import Any
 
 import fitz
+from docx import Document
+from docx.shared import Inches, Pt
 from pypdf import PdfReader, PdfWriter
 
 from wps_tool.core.errors import UnsupportedActionError
 from wps_tool.processors.base import FileProcessor
+from wps_tool.utils.logging import logger
 
 # ===== Layer (a) TODO：学生实现以下函数体 =====
 
@@ -262,6 +266,55 @@ def add_page_numbers(
     return output_path
 
 
+def pdf_to_docx(input_path: str, output_path: str, *, include_images: bool = True) -> str:
+    """把 PDF 转成 Word（.docx），返回 output_path。
+
+    逐页提取文本块，按行生成段落，尽量保留字号/加粗/斜体；页间插入分页符；
+    ``include_images`` 为真时把每页图片附在页尾。基于文本层的转换，复杂版式/表格/多栏
+    可能不完美；纯扫描件（无文本层）需先走 OCR。
+    """
+    src = fitz.open(input_path)
+    doc = Document()
+    for pno, page in enumerate(src, start=1):
+        data = page.get_text("dict")
+        for block in data.get("blocks", []):
+            if block.get("type") != 0:  # 0 = 文本块
+                continue
+            for line in block.get("lines", []):
+                spans = line.get("spans", [])
+                if not "".join(s.get("text", "") for s in spans).strip():
+                    continue
+                para = doc.add_paragraph()
+                for span in spans:
+                    run = para.add_run(span.get("text", ""))
+                    size = span.get("size")
+                    if size:
+                        run.font.size = Pt(round(float(size), 1))
+                    flags = span.get("flags", 0)
+                    run.bold = bool(flags & 16)    # bit4 = 粗体
+                    run.italic = bool(flags & 2)   # bit1 = 斜体
+        if include_images:
+            for img in page.get_images(full=True):
+                try:
+                    info = src.extract_image(img[0])
+                except Exception as exc:  # noqa: BLE001 — 坏图跳过，不中断整篇转换
+                    logger.warning("PDF 转 Word: 提取图片失败，跳过: {}", exc)
+                    continue
+                blob = info.get("image")
+                if not blob:
+                    continue
+                try:
+                    doc.add_picture(BytesIO(blob), width=Inches(6))
+                except Exception as exc:  # noqa: BLE001 — 个别格式不支持则跳过
+                    logger.warning("PDF 转 Word: 插入图片失败，跳过: {}", exc)
+                    continue
+        if pno < src.page_count:
+            doc.add_page_break()
+    doc.save(output_path)
+    src.close()
+    return output_path
+
+
 # ===== 已写好：PdfProcessor 分派胶水（学生不要改） =====
 
 
@@ -310,6 +363,12 @@ class PdfProcessor(FileProcessor):
                     options["output"],
                     start=options.get("start", 1),
                 )
+            case "to_word":
+                return pdf_to_docx(
+                    file_path,
+                    options["output"],
+                    include_images=options.get("include_images", True),
+                )
             case _:
                 raise UnsupportedActionError(f"PdfProcessor 不支持操作: {action}")
 
@@ -323,6 +382,7 @@ __all__ = [
     "extract_pdf_pages",
     "extract_pdf_text",
     "merge_pdfs",
+    "pdf_to_docx",
     "pdf_to_images",
     "rotate_pdf",
     "split_pdf",
