@@ -56,10 +56,12 @@ def setup_logging(level: str | None = None) -> logger:
         level or os.getenv("WPS_LOG_LEVEL") or os.getenv("LOG_LEVEL") or "INFO"
     ).upper()
     logger.remove()
-    logger.add(sys.stderr, level=effective_level, filter=_privacy_filter)
+    # 打包成窗口程序（console=False）时 sys.stderr 可能为 None，不能直接当 sink。
+    if sys.stderr is not None:
+        logger.add(sys.stderr, level=effective_level, filter=_privacy_filter)
     log_path = _log_file_path()
     if log_path is not None:
-        with contextlib.suppress(OSError):
+        with contextlib.suppress(OSError, TypeError):
             logger.add(
                 str(log_path),
                 level=effective_level,
