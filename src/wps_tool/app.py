@@ -12,7 +12,10 @@
 
 from __future__ import annotations
 
+import ctypes.util
+import os
 import sys
+from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
@@ -25,6 +28,30 @@ from wps_tool.services.ppt_beautify_api import PptBeautifyClient
 from wps_tool.ui.main_window import MainWindow
 from wps_tool.ui.theme import apply_theme
 from wps_tool.utils.logging import logger, setup_logging
+
+
+def _prefer_x11_on_wsl() -> None:
+    """WSLg 的 Wayland 有「弹出层不消失」的已知缺陷，装了 xcb 依赖时优先走 X11。
+
+    只影响 WSL（/proc/version 含 microsoft）且未显式设置 QT_QPA_PLATFORM 时；
+    缺少 libxcb-cursor 时保持默认（Wayland），避免启动失败。
+    """
+    if os.environ.get("QT_QPA_PLATFORM"):
+        return
+    try:
+        if "microsoft" not in Path("/proc/version").read_text(encoding="utf-8").lower():
+            return
+    except OSError:
+        return
+    if ctypes.util.find_library("xcb-cursor"):
+        os.environ["QT_QPA_PLATFORM"] = "xcb"
+
+
+def _settings_env_file() -> str:
+    """打包成 exe 后从 exe 同目录读 .env，否则从当前目录读。"""
+    if getattr(sys, "frozen", False):
+        return str(Path(sys.executable).resolve().parent / ".env")
+    return ".env"
 
 
 def build_runner(settings: Settings) -> Runner:
@@ -88,10 +115,11 @@ def build_beautify_client(settings: Settings) -> PptBeautifyClient | None:
 
 def main() -> int:
     setup_logging()
+    _prefer_x11_on_wsl()
     app = QApplication.instance() or QApplication(sys.argv)
     apply_theme(app)
 
-    settings = Settings()
+    settings = Settings(_env_file=_settings_env_file())
     logger.info(
         "应用配置加载: enable_api_upload={} llm_provider={} llm_model={} llm_base_url={} api_key_set={}",
         settings.enable_api_upload,

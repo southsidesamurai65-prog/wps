@@ -9,6 +9,7 @@ dist/
 
 # ---- 虚拟环境 ----
 .venv/
+.venv-win/
 venv/
 env/
 # 本项目自带的虚拟环境目录（名为 wps，非源码）

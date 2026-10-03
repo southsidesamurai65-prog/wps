@@ -29,27 +29,6 @@ QToolBar QToolButton {
 QToolBar QToolButton:hover { background: #eef2f8; }
 QToolBar QToolButton:pressed { background: #e2e8f2; }
 
-/* ---- 左侧功能栏 ---- */
-QListWidget {
-    background: #ffffff;
-    border: none;
-    border-right: 1px solid #e4e8ef;
-    padding: 8px 6px;
-    outline: 0;
-}
-QListWidget::item {
-    padding: 10px 12px;
-    margin: 2px 4px;
-    border-radius: 8px;
-    color: #4a5160;
-}
-QListWidget::item:hover { background: #eef2f8; }
-QListWidget::item:selected {
-    background: #2563eb;
-    color: #ffffff;
-    font-weight: 600;
-}
-
 /* ---- 输入控件 ---- */
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
     background: #ffffff;

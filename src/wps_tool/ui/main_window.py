@@ -1,15 +1,16 @@
 """主窗口（已写好，学生不要改）。
 
-布局（README 第 6 节）：
+布局：
     +------------------------------------------------+
-    | 顶部工具栏：打开文件 / 输出目录 / 设置          |
-    +------------------+-----------------------------+
-    | 左侧功能栏        | 主工作区                    |
-    |  - PDF 工具      |  拖拽区                      |
-    |  - Word 工具     |  文件表                      |
-    |  - PPT 工具      |  参数区（操作/输出目录）     |
-    |  - 批量任务      |  进度区                      |
-    +------------------+-----------------------------+
+    | 顶部工具栏：打开文件 / 输出目录 / 清空列表      |
+    +------------------------------------------------+
+    | 主工作区                                        |
+    |  拖拽区                                          |
+    |  文件表                                          |
+    |  参数区（功能 / 输出目录 / 参数）               |
+    |  进度区                                          |
+    |  结果区                                          |
+    +------------------------------------------------+
     | 状态栏                                          |
     +------------------------------------------------+
 
@@ -25,14 +26,12 @@ import contextlib
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
     QMainWindow,
     QProgressBar,
     QPushButton,
@@ -44,7 +43,7 @@ from PySide6.QtWidgets import (
 )
 
 from wps_tool.models.settings import Settings
-from wps_tool.ui.widgets import ACTION_LABELS, DropArea, FileTable, action_label, build_job_func
+from wps_tool.ui.widgets import DropArea, FileTable, action_label, build_job_func
 from wps_tool.utils.logging import logger
 
 
@@ -84,27 +83,17 @@ class MainWindow(QMainWindow):
     # ---- 中央区 ----
     def _build_central(self) -> None:
         central = QWidget(self)
-        root = QHBoxLayout(central)
+        root = QVBoxLayout(central)
 
-        # 左侧功能栏（仅作分类提示，操作在参数区）
-        self.sidebar = QListWidget()
-        self.sidebar.setMaximumWidth(150)
-        for label in ("PDF 工具", "Word 工具", "PPT 工具", "批量任务", "设置"):
-            self.sidebar.addItem(label)
-        root.addWidget(self.sidebar)
-
-        # 右侧主工作区
-        right = QVBoxLayout()
         self.drop_area = DropArea()
-        right.addWidget(self.drop_area)
+        root.addWidget(self.drop_area)
 
         self.table = FileTable()
-        right.addWidget(self.table, stretch=1)
+        root.addWidget(self.table, stretch=1)
 
-        right.addWidget(self._build_params())
-        right.addWidget(self._build_progress())
-        right.addWidget(self._build_result(), stretch=1)
-        root.addLayout(right, stretch=1)
+        root.addWidget(self._build_params())
+        root.addWidget(self._build_progress())
+        root.addWidget(self._build_result(), stretch=1)
 
         self.setCentralWidget(central)
 
@@ -213,36 +202,44 @@ class MainWindow(QMainWindow):
         return box
 
     def _populate_actions(self) -> None:
-        """按文档类型分区填充功能下拉（分区标题不可选，内部仍存 action id）。"""
-        groups: list[tuple[str, list[str]]] = [
-            ("通用（PDF / Word / PPT）", ["extract_text"]),
-            ("PDF 功能", [
-                "to_word", "split", "rotate", "extract_pages", "to_images",
-                "encrypt", "decrypt", "watermark", "page_numbers",
-            ]),
-            ("PPT 功能", ["analyze_structure", "extract_images", "replace_tokens"]),
-            ("Word 功能", ["replace"]),
-            ("图片功能", ["to_pdf", "compress", "resize", "convert", "rotate_image"]),
+        """按文档类型分区填充功能下拉：普通条目 + 分隔线，标签自带类型名。
+
+        用 QComboBox 默认模型（不用禁用项当分区标题），否则弹出列表会收不回去。
+        内部仍通过 itemData 存 action id（读取用 currentData()）。
+        """
+        groups: list[list[tuple[str, str]]] = [
+            [("提取文本（通用）", "extract_text")],
+            [
+                ("PDF 转 Word", "to_word"),
+                ("拆分 PDF", "split"),
+                ("旋转 PDF", "rotate"),
+                ("抽取页面", "extract_pages"),
+                ("转成图片", "to_images"),
+                ("加密 PDF", "encrypt"),
+                ("解密 PDF", "decrypt"),
+                ("加文字水印", "watermark"),
+                ("加页码", "page_numbers"),
+            ],
+            [
+                ("分析结构（PPT）", "analyze_structure"),
+                ("提取图片（PPT）", "extract_images"),
+                ("替换占位符（PPT）", "replace_tokens"),
+            ],
+            [("替换文本（Word）", "replace")],
+            [
+                ("图片转 PDF", "to_pdf"),
+                ("压缩图片", "compress"),
+                ("缩放图片", "resize"),
+                ("转换格式", "convert"),
+                ("旋转图片", "rotate_image"),
+            ],
         ]
-        model = QStandardItemModel(self.action_combo)
-        first_action_row = -1
-        for title, actions in groups:
-            header = QStandardItem(title)
-            header.setFlags(Qt.ItemFlag.NoItemFlags)  # 分区标题不可选
-            font = header.font()
-            font.setBold(True)
-            header.setFont(font)
-            header.setForeground(QColor("#8a93a3"))
-            model.appendRow(header)
-            for action in actions:
-                item = QStandardItem(ACTION_LABELS.get(action, action))
-                item.setData(action, Qt.ItemDataRole.UserRole)
-                model.appendRow(item)
-                if first_action_row < 0:
-                    first_action_row = model.rowCount() - 1
-        self.action_combo.setModel(model)
-        if first_action_row >= 0:
-            self.action_combo.setCurrentIndex(first_action_row)
+        for gi, group in enumerate(groups):
+            if gi:
+                self.action_combo.insertSeparator(self.action_combo.count())
+            for display, action in group:
+                self.action_combo.addItem(display, action)
+        self.action_combo.setCurrentIndex(0)
 
     def _build_result(self) -> QWidget:
         """结果查看区：extract_text / analyze_structure 等返回的内容显示在这里。"""

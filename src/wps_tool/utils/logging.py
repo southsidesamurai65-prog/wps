@@ -6,9 +6,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import sys
+from pathlib import Path
 
 from loguru import logger
 
@@ -32,13 +34,40 @@ def _privacy_filter(record: dict) -> bool:
     return True
 
 
+def _log_file_path() -> Path | None:
+    """打包成 exe 后额外写一份日志文件，便于用户排查（未打包时返回 None）。"""
+    custom = os.getenv("WPS_LOG_FILE")
+    if custom:
+        return Path(custom)
+    if not getattr(sys, "frozen", False):
+        return None
+    for folder in (Path(sys.executable).resolve().parent, Path.home() / ".wps-tool"):
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            return folder / "wps-tool.log"
+        except OSError:
+            continue
+    return None
+
+
 def setup_logging(level: str | None = None) -> logger:
-    """配置 loguru：移除默认 handler、加带脱敏的 stderr handler。"""
+    """配置 loguru：移除默认 handler、加带脱敏的 stderr handler（打包后另加文件日志）。"""
     effective_level = (
         level or os.getenv("WPS_LOG_LEVEL") or os.getenv("LOG_LEVEL") or "INFO"
     ).upper()
     logger.remove()
     logger.add(sys.stderr, level=effective_level, filter=_privacy_filter)
+    log_path = _log_file_path()
+    if log_path is not None:
+        with contextlib.suppress(OSError):
+            logger.add(
+                str(log_path),
+                level=effective_level,
+                filter=_privacy_filter,
+                rotation="1 MB",
+                retention=3,
+                encoding="utf-8",
+            )
     return logger
 
 

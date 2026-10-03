@@ -46,6 +46,32 @@
 - **LibreOffice / soffice**：Office 转 PDF。
 - **tesseract** + `pip install pytesseract`：OCR。
 
+> **WSLg 用户注意**：WSLg 的 Wayland 有「下拉菜单弹出后收不回去」的已知缺陷（非本程序 bug）。
+> 装上 X11 依赖后程序会自动改用 X11：`sudo apt-get install -y libxcb-cursor0`。也可手动指定
+> `QT_QPA_PLATFORM=xcb ./wps/bin/python -m wps_tool`。
+
+---
+
+## 打包成可执行文件（发给不懂技术的人）
+
+PyInstaller 打出**单文件**可执行程序，双击即用，无需装 Python。
+
+```bash
+./wps/bin/python -m pip install -e ".[dev]"        # 首次：装 pyinstaller
+./wps/bin/python -m PyInstaller packaging/wps_tool.spec --noconfirm
+# 产物：dist/wps-tool（Windows 为 dist\wps-tool.exe）
+```
+
+- **Windows 用户**：把仓库拷到 Windows，**双击 `packaging\build.bat`** 即可（自动建独立
+  venv、装依赖、出 `dist\wps-tool.exe`）。前提：装了 Python ≥ 3.11。
+- **不能跨平台打包**：Windows 的 `.exe` 必须在 Windows 上构建，Linux / macOS 同理。
+- 想把 `.env`（美化用的 LLM 配置）也给别人：复制到可执行文件**同目录**，程序会优先读它。
+  ⚠️ 别把含**真实 API Key** 的 `.env` 随 exe 分发（等于把 key 给了所有人，会消耗你的额度）。
+  **不带 `.env` 时美化默认关闭**，其余本地功能照常可用。
+- 程序运行日志写在 exe 同目录 `wps-tool.log`（不可写时退回 `~/.wps-tool/`），出问题可发来排查。
+- 不想手动多平台构建？仓库带 `.github/workflows/build.yml`，在 GitHub 上手动触发
+  （或打 `v*` tag）即可自动构建 Windows / macOS / Linux 三份产物并作为 artifact 下载。
+
 ---
 
 ## 界面使用

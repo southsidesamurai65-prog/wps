@@ -16,6 +16,7 @@ virtualenv, *not* the package (the package is `src/wps_tool`). System `python3` 
 ./wps/bin/python -m pytest tests/test_pdf_processor.py::test_merge_pdfs -q  # single test
 ./wps/bin/python -m ruff check src tests      # lint (no typecheck, no CI, no pre-commit)
 ./wps/bin/python -m wps_tool                  # launch desktop UI
+./wps/bin/python -m PyInstaller packaging/wps_tool.spec --noconfirm  # package onefile
 ```
 
 - Run from repo root: `Settings` reads `.env` relative to cwd; tests import `_fakes`.
@@ -51,4 +52,11 @@ virtualenv, *not* the package (the package is `src/wps_tool`). System `python3` 
   requests need `LLM_API_KEY` from the `opencode-go` entry in `~/.local/share/opencode/auth.json`.
 - `conftest.py` builds all sample files in code — no binary fixtures are shipped.
 - `.env` is gitignored and present locally; use `.env.example` as the template.
+- This dev box is **WSL2/WSLg**, and the app runs on Qt's `wayland` platform. WSLg's Wayland has a
+  compositor bug where combo/menu popups don't unmap ("stuck open"). `app.py::_prefer_x11_on_wsl`
+  auto-switches to `xcb` once `libxcb-cursor0` is installed; don't remove it. The packaged Windows
+  exe is unaffected (native Windows Qt).
+- Packaging: `packaging/wps_tool.spec` + `launcher.py` (needs `pyinstaller`, in `[dev]`). PyInstaller
+  can't cross-compile; `.github/workflows/build.yml` builds all three OSes. Frozen app reads `.env`
+  next to the executable (`app.py::_settings_env_file`), not cwd.
 - Commit style: Conventional Commits with Chinese scope/message, e.g. `feat(pdf): …`, `docs(readme): …`.
