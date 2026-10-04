@@ -208,7 +208,10 @@ class MainWindow(QMainWindow):
         内部仍通过 itemData 存 action id（读取用 currentData()）。
         """
         groups: list[list[tuple[str, str]]] = [
-            [("提取文本（通用）", "extract_text")],
+            [
+                ("提取文本（通用）", "extract_text"),
+                ("提取图片（PDF / Word / PPT）", "extract_images"),
+            ],
             [
                 ("PDF 转 Word", "to_word"),
                 ("拆分 PDF", "split"),
@@ -218,11 +221,11 @@ class MainWindow(QMainWindow):
                 ("加密 PDF", "encrypt"),
                 ("解密 PDF", "decrypt"),
                 ("加文字水印", "watermark"),
+                ("去水印", "remove_watermark"),
                 ("加页码", "page_numbers"),
             ],
             [
                 ("分析结构（PPT）", "analyze_structure"),
-                ("提取图片（PPT）", "extract_images"),
                 ("替换占位符（PPT）", "replace_tokens"),
             ],
             [("替换文本（Word）", "replace")],
@@ -396,6 +399,11 @@ class MainWindow(QMainWindow):
             return {
                 "output": str(Path(out_dir) / f"{stem}_watermark.pdf"),
                 "text": self.watermark_edit.text().strip() or "CONFIDENTIAL",
+            }
+        if action == "remove_watermark":
+            return {
+                "output": str(Path(out_dir) / f"{stem}_clean.pdf"),
+                "text": self.watermark_edit.text().strip() or None,
             }
         if action == "page_numbers":
             return {"output": str(Path(out_dir) / f"{stem}_numbered.pdf")}

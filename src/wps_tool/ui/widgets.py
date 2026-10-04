@@ -51,6 +51,7 @@ ACTION_LABELS: dict[str, str] = {
     "encrypt": "加密 PDF",
     "decrypt": "解密 PDF",
     "watermark": "加文字水印",
+    "remove_watermark": "去水印",
     "page_numbers": "加页码",
     "resize": "缩放图片",
     "convert": "转换格式",

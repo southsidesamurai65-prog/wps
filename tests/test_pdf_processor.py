@@ -17,11 +17,13 @@ from wps_tool.processors.pdf_processor import (
     add_watermark,
     decrypt_pdf,
     encrypt_pdf,
+    extract_pdf_images,
     extract_pdf_pages,
     extract_pdf_text,
     merge_pdfs,
     pdf_to_docx,
     pdf_to_images,
+    remove_watermark,
     rotate_pdf,
     split_pdf,
 )
@@ -105,6 +107,60 @@ def test_add_page_numbers(sample_pdf_multipage, tmp_output_dir):
     text = doc[2].get_text()
     assert "3" in text
     doc.close()
+
+
+def test_extract_pdf_images(sample_png, tmp_path, tmp_output_dir):
+    src = tmp_path / "withimg.pdf"
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_image(fitz.Rect(0, 0, 100, 100), filename=str(sample_png))
+    doc.save(str(src))
+    doc.close()
+
+    paths = extract_pdf_images(str(src), str(tmp_output_dir))
+    assert len(paths) == 1
+    assert Path(paths[0]).exists()
+    assert Image.open(paths[0]).size[0] > 0
+
+
+def test_remove_watermark_auto(sample_pdf_multipage, tmp_output_dir):
+    wm = tmp_output_dir / "wm.pdf"
+    add_watermark(str(sample_pdf_multipage), str(wm), "CONFIDENTIAL")
+    clean = tmp_output_dir / "clean.pdf"
+
+    remove_watermark(str(wm), str(clean))
+
+    text = extract_pdf_text(str(clean))
+    assert "CONFIDENTIAL" not in text
+    assert "PAGE_A" in text and "PAGE_C" in text
+
+
+def test_remove_watermark_explicit_text(sample_pdf_multipage, tmp_output_dir):
+    wm = tmp_output_dir / "wm2.pdf"
+    add_watermark(str(sample_pdf_multipage), str(wm), "SECRET")
+    clean = tmp_output_dir / "clean2.pdf"
+
+    remove_watermark(str(wm), str(clean), text="SECRET")
+
+    assert "SECRET" not in extract_pdf_text(str(clean))
+
+
+def test_remove_watermark_keeps_images(sample_png, tmp_path, tmp_output_dir):
+    src = tmp_path / "withimg.pdf"
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_image(fitz.Rect(0, 0, 100, 100), filename=str(sample_png))
+    doc.save(str(src))
+    doc.close()
+    wm = tmp_output_dir / "wm3.pdf"
+    add_watermark(str(src), str(wm), "DRAFT")
+    clean = tmp_output_dir / "clean3.pdf"
+
+    remove_watermark(str(wm), str(clean))
+
+    out = fitz.open(str(clean))
+    assert len(out[0].get_images()) == 1  # 图片保留
+    out.close()
 
 
 def test_pdf_to_docx(sample_pdf_multipage, tmp_output_dir):

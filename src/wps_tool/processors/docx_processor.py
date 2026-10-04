@@ -14,6 +14,7 @@ DocxProcessor 类已写好当分派胶水。
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from docx import Document
@@ -60,6 +61,33 @@ def replace_docx_text(input_path: str, output_path: str, mapping: dict[str, str]
     raise NotImplementedError("TODO(Layer a): 实现 replace_docx_text")
 
 
+def extract_docx_images(input_path: str, output_dir: str) -> list[str]:
+    """提取 DOCX 内嵌图片（含页眉/页脚），保存到 output_dir，返回路径列表。
+
+    图片在 OOXML 包里位于 ``/word/media/``，用包部件遍历拿 blob，命名 image_{n}.{ext}。
+    """
+    doc = Document(input_path)
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths: list[str] = []
+    seen: set[str] = set()
+    n = 0
+    for part in doc.part.package.iter_parts():
+        partname = str(getattr(part, "partname", ""))
+        if not partname.startswith("/word/media/") or partname in seen:
+            continue
+        seen.add(partname)
+        blob = getattr(part, "blob", None)
+        if not blob:
+            continue
+        ext = partname.rsplit(".", 1)[-1].lower() if "." in partname else "bin"
+        n += 1
+        out = out_dir / f"image_{n}.{ext}"
+        out.write_bytes(blob)
+        paths.append(str(out))
+    return paths
+
+
 class DocxProcessor(FileProcessor):
     supported_extensions = {".docx"}
 
@@ -69,8 +97,15 @@ class DocxProcessor(FileProcessor):
                 return extract_docx_text(file_path)
             case "replace":
                 return replace_docx_text(file_path, options["output"], options["mapping"])
+            case "extract_images":
+                return extract_docx_images(file_path, options["output_dir"])
             case _:
                 raise UnsupportedActionError(f"DocxProcessor 不支持操作: {action}")
 
 
-__all__ = ["DocxProcessor", "extract_docx_text", "replace_docx_text"]
+__all__ = [
+    "DocxProcessor",
+    "extract_docx_images",
+    "extract_docx_text",
+    "replace_docx_text",
+]

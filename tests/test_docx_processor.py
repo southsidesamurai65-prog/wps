@@ -7,14 +7,31 @@ replace 分两档：简单档（token 在单 run，断言文本命中）+ 保样
 from __future__ import annotations
 
 from docx import Document
+from docx.shared import Inches
 
-from wps_tool.processors.docx_processor import extract_docx_text, replace_docx_text
+from wps_tool.processors.docx_processor import (
+    extract_docx_images,
+    extract_docx_text,
+    replace_docx_text,
+)
 
 
 def test_extract_docx_text(sample_docx):
     text = extract_docx_text(str(sample_docx))
     assert "{{COMPANY}} is great" in text
     assert "Second paragraph." in text
+
+
+def test_extract_docx_images(sample_png, tmp_path, tmp_output_dir):
+    src = tmp_path / "withimg.docx"
+    d = Document()
+    d.add_paragraph("hello")
+    d.add_picture(str(sample_png), width=Inches(1))
+    d.save(str(src))
+
+    paths = extract_docx_images(str(src), str(tmp_output_dir))
+    assert len(paths) == 1
+    assert paths[0].endswith(".png")
 
 
 def test_replace_docx_text_simple(sample_docx, tmp_output_dir):

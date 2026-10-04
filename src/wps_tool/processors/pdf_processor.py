@@ -19,6 +19,7 @@ PdfProcessor 类已写好当分派胶水，学生不要改它。
 from __future__ import annotations
 
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 import fitz
@@ -331,6 +332,98 @@ def pdf_to_docx(input_path: str, output_path: str, *, include_images: bool = Tru
     return output_path
 
 
+def extract_pdf_images(input_path: str, output_dir: str) -> list[str]:
+    """提取 PDF 里所有内嵌图片，保存到 output_dir，返回路径列表。
+
+    按页顺序提取，同一张图（xref 相同）只导出一次；命名 image_{n}.{ext}。
+    """
+    doc = fitz.open(input_path)
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths: list[str] = []
+    seen: set[int] = set()
+    n = 0
+    for page in doc:
+        for img in page.get_images(full=True):
+            xref = img[0]
+            if xref in seen:
+                continue
+            seen.add(xref)
+            try:
+                info = doc.extract_image(xref)
+            except Exception as exc:  # noqa: BLE001 — 坏图跳过，不中断
+                logger.warning("PDF 提取图片: 提取失败，跳过 xref={}: {}", xref, exc)
+                continue
+            blob, ext = info.get("image"), info.get("ext") or "png"
+            if not blob:
+                continue
+            n += 1
+            out = out_dir / f"image_{n}.{ext}"
+            out.write_bytes(blob)
+            paths.append(str(out))
+    doc.close()
+    return paths
+
+
+def remove_watermark(
+    input_path: str,
+    output_path: str,
+    *,
+    text: str | None = None,
+    min_pages: int = 2,
+    min_size: float = 20.0,
+) -> str:
+    """尽力去除 PDF 水印，返回 output_path。
+
+    能处理：
+      - 水印/图章类注释（Watermark / Stamp annotation）；
+      - 内容流里跨多页重复的大号文字水印（如常见的 "CONFIDENTIAL"）。
+    给 ``text`` 时只删该文字；不给则自动识别「出现在 >= min_pages 页且字号 >= min_size」的文字。
+    局限：以图片/矢量图形形式画进页面的水印无法可靠去除（会被保留）。
+    """
+    doc = fitz.open(input_path)
+    # 1) 注释型水印
+    for page in doc:
+        try:
+            annots = list(page.annots() or [])
+        except Exception:  # noqa: BLE001 — 个别损坏注释忽略
+            annots = []
+        for annot in annots:
+            if annot.type[0] in (fitz.PDF_ANNOT_WATERMARK, fitz.PDF_ANNOT_STAMP):
+                page.delete_annot(annot)
+    # 2) 文字型水印
+    if text:
+        for page in doc:
+            for rect in page.search_for(text):
+                page.add_redact_annot(rect)
+    else:
+        stats: dict[str, dict] = {}
+        for pno, page in enumerate(doc):
+            for block in page.get_text("dict").get("blocks", []):
+                if block.get("type") != 0:
+                    continue
+                for line in block.get("lines", []):
+                    for span in line.get("spans", []):
+                        label = span.get("text", "").strip()
+                        if not label:
+                            continue
+                        entry = stats.setdefault(
+                            label, {"pages": set(), "rects": [], "size": 0.0}
+                        )
+                        entry["pages"].add(pno)
+                        entry["rects"].append((pno, fitz.Rect(span["bbox"])))
+                        entry["size"] = max(entry["size"], float(span.get("size", 0.0)))
+        for entry in stats.values():
+            if len(entry["pages"]) >= min_pages and entry["size"] >= min_size:
+                for pno, rect in entry["rects"]:
+                    doc[pno].add_redact_annot(rect)
+    for page in doc:
+        page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)  # 只删水印文字，保留图片
+    doc.save(output_path)
+    doc.close()
+    return output_path
+
+
 # ===== 已写好：PdfProcessor 分派胶水（学生不要改） =====
 
 
@@ -385,6 +478,14 @@ class PdfProcessor(FileProcessor):
                     options["output"],
                     include_images=options.get("include_images", True),
                 )
+            case "extract_images":
+                return extract_pdf_images(file_path, options["output_dir"])
+            case "remove_watermark":
+                return remove_watermark(
+                    file_path,
+                    options["output"],
+                    text=options.get("text"),
+                )
             case _:
                 raise UnsupportedActionError(f"PdfProcessor 不支持操作: {action}")
 
@@ -395,11 +496,13 @@ __all__ = [
     "add_watermark",
     "decrypt_pdf",
     "encrypt_pdf",
+    "extract_pdf_images",
     "extract_pdf_pages",
     "extract_pdf_text",
     "merge_pdfs",
     "pdf_to_docx",
     "pdf_to_images",
+    "remove_watermark",
     "rotate_pdf",
     "split_pdf",
 ]
