@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pptx import Presentation
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 from wps_tool.processors.ppt_processor import (
     analyze_pptx_structure,
@@ -24,6 +25,24 @@ def test_extract_pptx_images(sample_pptx, tmp_output_dir):
     paths = extract_pptx_images(str(sample_pptx), str(tmp_output_dir))
     assert len(paths) == 1
     assert all(p.endswith((".png", ".jpeg", ".jpg")) for p in paths)
+
+
+def test_extract_pptx_images_skips_unreadable(sample_pptx, tmp_output_dir):
+    """回归：图片没有 r:embed（纯 SVG / 外链图）时应跳过，而不是抛 ValueError。"""
+    prs = Presentation(str(sample_pptx))
+    a_ns = "http://schemas.openxmlformats.org/drawingml/2006/main"
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                blip = shape._element.find(f".//{{{a_ns}}}blip")
+                if blip is not None:
+                    for attr in list(blip.attrib):
+                        if attr.endswith("}embed"):
+                            del blip.attrib[attr]
+    broken = tmp_output_dir / "broken.pptx"
+    prs.save(str(broken))
+
+    assert extract_pptx_images(str(broken), str(tmp_output_dir)) == []
 
 
 def test_analyze_pptx_structure(sample_pptx):
