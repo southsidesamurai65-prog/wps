@@ -19,7 +19,10 @@ _ROOT = os.path.dirname(_SPEC_DIR)
 
 datas, binaries, hiddenimports = [], [], []
 # 这些库带数据文件（模板/字体等），必须显式收集，否则打包后运行报错。
-for pkg in ("pptx", "docx", "fitz", "pymupdf", "pydantic_settings", "loguru"):
+for pkg in (
+    "pptx", "docx", "fitz", "pymupdf", "pydantic_settings", "loguru",
+    "rapidocr_onnxruntime", "onnxruntime",  # OCR 引擎与模型
+):
     try:
         d, b, h = collect_all(pkg)
         datas += d

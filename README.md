@@ -12,9 +12,9 @@
 - **PDF**：合并、拆分、旋转、抽取指定页、转图片、提取文本、提取图片、转 Word（.docx）、加密、解密、加文字水印、去水印、加页码
 - **Word（DOCX）**：提取文本、提取图片、批量替换（保留 run 样式）
 - **PPT（PPTX）**：提取文本、提取图片（含纯 SVG、组合图）、结构分析、批量替换 token
-- **图片**：多图合成 PDF、压缩、缩放、格式转换、旋转、提取文本（OCR，需 tesseract）
+- **图片**：多图合成 PDF、压缩、缩放、格式转换、旋转、提取文本（内置 OCR）
 - **Office 转 PDF**：LibreOffice 命令行封装（DOCX/PPTX → PDF，需本机装 LibreOffice）
-- **OCR**：扫描版 PDF / 图片文字识别（pytesseract，可选）
+- **OCR**：图片文字识别（内置 `rapidocr-onnxruntime`，中英文，无需另装引擎）
 - **批量处理**：一键对列表里所有文件执行同一操作
 - **PPT 美化**：本地解析每页 shape 清单（文本 + 图片占位）→ 把清单（**不含图片字节**）发给 LLM
   拿「shape 级重设计 spec」→ 本地用 python-pptx 按 spec 逐 shape 重建一套干净 deck，图片本地抽图插入
@@ -48,7 +48,8 @@
 外部可选依赖（按需，不装则相关功能/测试自动跳过）：
 
 - **LibreOffice / soffice**：Office 转 PDF。
-- **tesseract** + `pip install pytesseract`：OCR。
+
+> OCR（图片提取文本）已内置 `rapidocr-onnxruntime`（纯 pip、可打进 exe），无需另装引擎。
 
 > **WSLg 用户注意**：WSLg 的 Wayland 有「下拉菜单弹出后收不回去」的已知缺陷（非本程序 bug）。
 > 装上 X11 依赖后程序会自动改用 X11：`sudo apt-get install -y libxcb-cursor0`。也可手动指定
@@ -212,7 +213,7 @@ client.close()
 | PPTX | python-pptx |
 | Office 转 PDF | LibreOffice 命令行 |
 | 图片 | Pillow |
-| OCR | pytesseract（可选） |
+| OCR | rapidocr-onnxruntime（纯 pip，内置） |
 | HTTP | httpx |
 | 配置 | pydantic-settings |
 | 日志 | loguru |

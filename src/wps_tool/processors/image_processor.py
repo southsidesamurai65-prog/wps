@@ -98,8 +98,8 @@ class ImageProcessor(FileProcessor):
             case "extract_text":
                 if not ocr_available():
                     raise ConversionError(
-                        "图片提取文本需要 OCR：请先安装 tesseract 并 pip install pytesseract"
-                        "（Windows 见 README「可选依赖」）。"
+                        "图片提取文本需要 OCR：请安装 rapidocr-onnxruntime"
+                        "（正常随依赖自动安装；缺失时执行 pip install rapidocr-onnxruntime）。"
                     )
                 return ocr_image(file_path)
             case "to_pdf":

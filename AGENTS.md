@@ -21,7 +21,7 @@ virtualenv, *not* the package (the package is `src/wps_tool`). System `python3` 
 
 - Run from repo root: `Settings` reads `.env` relative to cwd; tests import `_fakes`.
 - Expected baseline: all tests green. Skips (`test_ocr`, `test_office_convert`) mean
-  LibreOffice/tesseract are absent — not failures. `test_integration` XPASSes once all
+  `rapidocr-onnxruntime` / LibreOffice are absent — not failures. `test_integration` XPASSes once all
   three layers are implemented (currently does).
 - `ruff check src tests` is clean; run it after edits (no CI/pre-commit enforces it).
 
