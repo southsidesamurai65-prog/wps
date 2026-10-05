@@ -78,6 +78,8 @@ class MainWindow(QMainWindow):
         tb.addAction("打开文件…", self._on_open_files)
         tb.addAction("设置输出目录…", self._on_pick_output_dir)
         tb.addSeparator()
+        tb.addAction("全选/全不选", self._on_toggle_check_all)
+        tb.addAction("删除勾选", self._on_delete_checked)
         tb.addAction("清空列表", self._on_clear_list)
 
     # ---- 中央区 ----
@@ -182,21 +184,24 @@ class MainWindow(QMainWindow):
         row2b.addWidget(self.format_combo)
         outer.addLayout(row2b)
 
-        # 第三行：动作按钮
+        # 第三行：动作按钮（勾选 = 表格第一列）
         row3 = QHBoxLayout()
-        self.run_btn = QPushButton("处理选中行")
+        self.run_btn = QPushButton("处理勾选")
         self.run_btn.setDefault(True)
         self.run_btn.clicked.connect(self._on_run_selected)
         row3.addWidget(self.run_btn)
         self.run_all_btn = QPushButton("处理全部")
         self.run_all_btn.clicked.connect(self._on_run_all)
         row3.addWidget(self.run_all_btn)
-        self.merge_btn = QPushButton("合并选中 PDF")
+        self.merge_btn = QPushButton("合并勾选 PDF")
         self.merge_btn.clicked.connect(self._on_merge_selected)
         row3.addWidget(self.merge_btn)
-        self.beautify_btn = QPushButton("美化选中 PPT")
+        self.beautify_btn = QPushButton("美化勾选 PPT")
         self.beautify_btn.clicked.connect(self._on_beautify_selected)
         row3.addWidget(self.beautify_btn)
+        self.delete_btn = QPushButton("删除勾选")
+        self.delete_btn.clicked.connect(self._on_delete_checked)
+        row3.addWidget(self.delete_btn)
         row3.addStretch(1)
         outer.addLayout(row3)
         return box
@@ -302,11 +307,26 @@ class MainWindow(QMainWindow):
         self.result_view.clear()
 
     def _on_run_selected(self) -> None:
-        rows = sorted({i.row() for i in self.table.selectedIndexes()})
+        rows = self.table.checked_rows()
         if not rows:
-            self.statusBar().showMessage("请先在表格里选中要处理的行。")
+            self.statusBar().showMessage("请先勾选要处理的文件（表格第一列）。")
             return
         self._run_rows(rows)
+
+    def _on_toggle_check_all(self) -> None:
+        total = self.table.rowCount()
+        if not total:
+            return
+        all_checked = len(self.table.checked_rows()) == total
+        self.table.set_all_checked(not all_checked)
+
+    def _on_delete_checked(self) -> None:
+        job_ids = self.table.checked_job_ids()
+        if not job_ids:
+            self.statusBar().showMessage("请先勾选要删除的文件（表格第一列）。")
+            return
+        removed = self.table.remove_jobs(job_ids)
+        self.statusBar().showMessage(f"已删除 {removed} 个文件。")
 
     def _on_run_all(self) -> None:
         """对列表里所有文件执行当前操作（批量处理）。"""
@@ -461,12 +481,10 @@ class MainWindow(QMainWindow):
         return pages or [0]
 
     def _on_merge_selected(self) -> None:
-        rows = sorted({i.row() for i in self.table.selectedIndexes()})
-        job_ids = [self.table.item(r, 0).data(Qt.ItemDataRole.UserRole) for r in rows]
-        inputs = [self.table.path_for(jid) for jid in job_ids if jid]
-        inputs = [p for p in inputs if p]
+        job_ids = self.table.checked_job_ids()
+        inputs = [p for p in (self.table.path_for(jid) for jid in job_ids) if p]
         if len(inputs) < 2:
-            self.statusBar().showMessage("合并至少需要选中 2 个 PDF。")
+            self.statusBar().showMessage("合并至少需要勾选 2 个 PDF（可勾选不连续的行）。")
             return
         out_dir = self.output_edit.text().strip() or str(Path(inputs[0]).parent / "processed")
         Path(out_dir).mkdir(parents=True, exist_ok=True)
@@ -504,16 +522,16 @@ class MainWindow(QMainWindow):
                 " 可选）后重启。"
             )
             return
-        rows = sorted({i.row() for i in self.table.selectedIndexes()})
-        if not rows:
-            logger.warning("PPT 美化未提交: 未选中文件")
-            self.statusBar().showMessage("请先在表格里选中一个 .pptx 文件。")
+        job_ids = self.table.checked_job_ids()
+        if not job_ids:
+            logger.warning("PPT 美化未提交: 未勾选文件")
+            self.statusBar().showMessage("请先勾选一个 .pptx 文件（表格第一列）。")
             return
-        if len(rows) != 1:
-            logger.warning("PPT 美化未提交: 选中行数={}", len(rows))
-            self.statusBar().showMessage("美化一次只处理一个 .pptx，请只选中一行。")
+        if len(job_ids) != 1:
+            logger.warning("PPT 美化未提交: 勾选行数={}", len(job_ids))
+            self.statusBar().showMessage("美化一次只处理一个 .pptx，请只勾选一个。")
             return
-        job_id = self.table.item(rows[0], 0).data(Qt.ItemDataRole.UserRole)
+        job_id = job_ids[0]
         file_path = self.table.path_for(job_id)
         if not file_path or Path(file_path).suffix.lower() != ".pptx":
             logger.warning(

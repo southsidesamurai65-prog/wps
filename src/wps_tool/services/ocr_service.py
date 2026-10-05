@@ -39,7 +39,11 @@ def ocr_image(image_path: str, lang: str = "chi_sim+eng") -> str:
       - image = Image.open(image_path); return pytesseract.image_to_string(image, lang=lang)
       - 不可用时由上层（UI/调用方）用 ocr_available() 先判，本函数不处理缺依赖。
     """
-    raise NotImplementedError("TODO(Layer a): 实现 ocr_image")
+    import pytesseract
+    from PIL import Image
+
+    image = Image.open(image_path)
+    return pytesseract.image_to_string(image, lang=lang)
 
 
 __all__ = ["ocr_available", "ocr_image", "tesseract_available"]

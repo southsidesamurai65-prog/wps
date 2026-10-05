@@ -16,8 +16,9 @@ from typing import Any
 
 from PIL import Image
 
-from wps_tool.core.errors import UnsupportedActionError
+from wps_tool.core.errors import ConversionError, UnsupportedActionError
 from wps_tool.processors.base import FileProcessor
+from wps_tool.services.ocr_service import ocr_available, ocr_image
 
 
 def images_to_pdf(image_paths: list[str], output_path: str) -> str:
@@ -94,6 +95,13 @@ class ImageProcessor(FileProcessor):
 
     def run(self, file_path: str, action: str, options: dict) -> Any:
         match action:
+            case "extract_text":
+                if not ocr_available():
+                    raise ConversionError(
+                        "图片提取文本需要 OCR：请先安装 tesseract 并 pip install pytesseract"
+                        "（Windows 见 README「可选依赖」）。"
+                    )
+                return ocr_image(file_path)
             case "to_pdf":
                 return images_to_pdf(options["inputs"], options["output"])
             case "compress":

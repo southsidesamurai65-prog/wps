@@ -118,21 +118,29 @@ class DropArea(QFrame):
 
 
 class FileTable(QTableWidget):
-    """文件列表：列 = [文件, 类型, 操作, 状态]。行存 job_id（用 Qt.UserRole）。"""
+    """文件列表：列 = [选, 文件, 类型, 操作, 状态]。勾选框用于多选（可不连续）。"""
 
-    COLUMNS = ["文件", "类型", "操作", "状态"]
+    COLUMNS = ["选", "文件", "类型", "操作", "状态"]
+    CHECK_COL = 0
+    NAME_COL = 1
+    TYPE_COL = 2
+    ACTION_COL = 3
+    STATUS_COL = 4
 
     def __init__(self, parent=None) -> None:
         super().__init__(0, len(self.COLUMNS), parent)
         self.setHorizontalHeaderLabels(self.COLUMNS)
         self.horizontalHeader().setStretchLastSection(True)
         self.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         self.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.setColumnWidth(self.CHECK_COL, 36)
+        self.setColumnWidth(self.TYPE_COL, 70)
         # job_id -> 完整路径（表格只显示文件名，真实路径存这里）
         self._paths: dict[str, str] = {}
 
     def add_files(self, paths: list[str]) -> list[tuple[str, str]]:
-        """把文件加进表格，返回 [(job_id, file_path), ...] 供调用方建 job。"""
+        """把文件加进表格（默认不勾选），返回 [(job_id, file_path), ...]。"""
         added = []
         import uuid
 
@@ -142,12 +150,17 @@ class FileTable(QTableWidget):
             ext = Path(p).suffix.lower()
             job_id = uuid.uuid4().hex[:8]
             self._paths[job_id] = p
-            name_item = QTableWidgetItem(Path(p).name)
-            name_item.setData(Qt.ItemDataRole.UserRole, job_id)
-            self.setItem(row, 0, name_item)
-            self.setItem(row, 1, QTableWidgetItem(ext or "?"))
-            self.setItem(row, 2, QTableWidgetItem(action_label(default_action_for(p))))
-            self.setItem(row, 3, QTableWidgetItem("等待中"))
+            check = QTableWidgetItem()
+            check.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+            check.setCheckState(Qt.CheckState.Unchecked)
+            check.setData(Qt.ItemDataRole.UserRole, job_id)
+            self.setItem(row, self.CHECK_COL, check)
+            self.setItem(row, self.NAME_COL, QTableWidgetItem(Path(p).name))
+            self.setItem(row, self.TYPE_COL, QTableWidgetItem(ext or "?"))
+            self.setItem(
+                row, self.ACTION_COL, QTableWidgetItem(action_label(default_action_for(p)))
+            )
+            self.setItem(row, self.STATUS_COL, QTableWidgetItem("等待中"))
             added.append((job_id, p))
         return added
 
@@ -157,20 +170,58 @@ class FileTable(QTableWidget):
 
     def row_for_job(self, job_id: str) -> int:
         for row in range(self.rowCount()):
-            item = self.item(row, 0)
+            item = self.item(row, self.CHECK_COL)
             if item and item.data(Qt.ItemDataRole.UserRole) == job_id:
                 return row
         return -1
 
+    def checked_rows(self) -> list[int]:
+        """返回被勾选的行号（升序）。"""
+        return [
+            row
+            for row in range(self.rowCount())
+            if self.item(row, self.CHECK_COL)
+            and self.item(row, self.CHECK_COL).checkState() == Qt.CheckState.Checked
+        ]
+
+    def checked_job_ids(self) -> list[str]:
+        """返回被勾选行的 job_id（行序）。"""
+        ids = []
+        for row in self.checked_rows():
+            job_id = self.item(row, self.CHECK_COL).data(Qt.ItemDataRole.UserRole)
+            if job_id:
+                ids.append(job_id)
+        return ids
+
+    def set_all_checked(self, checked: bool) -> None:
+        state = Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
+        for row in range(self.rowCount()):
+            item = self.item(row, self.CHECK_COL)
+            if item:
+                item.setCheckState(state)
+
+    def remove_jobs(self, job_ids: list[str]) -> int:
+        """删除给定 job 的行，返回删除条数。"""
+        targets = set(job_ids)
+        removed = 0
+        for row in range(self.rowCount() - 1, -1, -1):
+            item = self.item(row, self.CHECK_COL)
+            job_id = item.data(Qt.ItemDataRole.UserRole) if item else None
+            if job_id in targets:
+                self._paths.pop(job_id, None)
+                self.removeRow(row)
+                removed += 1
+        return removed
+
     def set_status(self, job_id: str, status: str) -> None:
         row = self.row_for_job(job_id)
         if row >= 0:
-            self.item(row, 3).setText(status)
+            self.item(row, self.STATUS_COL).setText(status)
 
     def set_action(self, job_id: str, action_label: str) -> None:
         row = self.row_for_job(job_id)
         if row >= 0:
-            self.item(row, 2).setText(action_label)
+            self.item(row, self.ACTION_COL).setText(action_label)
 
 
 def build_job_func(registry, file_path: str, action: str, options: dict):

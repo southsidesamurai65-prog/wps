@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import pytest
 from PIL import Image
 from pypdf import PdfReader
 
+from wps_tool.core.errors import ConversionError
 from wps_tool.processors.image_processor import (
+    ImageProcessor,
     compress_image,
     convert_image,
     images_to_pdf,
     resize_image,
     rotate_image,
 )
+from wps_tool.services.ocr_service import ocr_available
 
 
 def test_images_to_pdf(sample_pngs, tmp_output_dir):
@@ -51,3 +55,13 @@ def test_rotate_image(sample_png, tmp_output_dir):
     out = tmp_output_dir / "rotated.png"
     rotate_image(str(sample_png), str(out), angle=90)
     assert Image.open(str(out)).size == (100, 100)
+
+
+def test_image_extract_text_uses_ocr(sample_png):
+    """图片提取文本走 OCR：能用则返回 str，缺依赖则抛清晰的 ConversionError。"""
+    proc = ImageProcessor()
+    if ocr_available():
+        assert isinstance(proc.run(str(sample_png), "extract_text", {}), str)
+    else:
+        with pytest.raises(ConversionError):
+            proc.run(str(sample_png), "extract_text", {})
