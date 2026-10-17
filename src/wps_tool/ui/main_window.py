@@ -62,6 +62,8 @@ class MainWindow(QMainWindow):
         # PPT 美化外部 API 客户端（由 app.py 依配置注入；未启用时为 None）。
         # 为 None 时「美化」按钮只提示未配置，不触发任何网络请求。
         self.beautify_client = beautify_client
+        # job_id -> 中文操作名，用于状态显示「xx成功 / xx失败」。
+        self._job_actions: dict[str, str] = {}
         self.setWindowTitle("WPS 工具箱 — 本地 Office/PDF 处理")
         self.resize(1180, 880)
 
@@ -289,8 +291,6 @@ class MainWindow(QMainWindow):
 
     def _on_files_dropped(self, paths: list[str]) -> None:
         added = self.table.add_files(paths)
-        for job_id, _p in added:
-            self.table.set_status(job_id, "等待中")
         self.statusBar().showMessage(f"已加入 {len(added)} 个文件。")
 
     def _on_pick_output_dir(self) -> None:
@@ -302,6 +302,7 @@ class MainWindow(QMainWindow):
 
     def _on_clear_list(self) -> None:
         self.table.setRowCount(0)
+        self._job_actions.clear()
         self.progress_bar.setValue(0)
         self.progress_label.setText("等待任务")
         self.result_view.clear()
@@ -326,6 +327,8 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("请先勾选要删除的文件（表格第一列）。")
             return
         removed = self.table.remove_jobs(job_ids)
+        for job_id in job_ids:
+            self._job_actions.pop(job_id, None)
         self.statusBar().showMessage(f"已删除 {removed} 个文件。")
 
     def _on_run_all(self) -> None:
@@ -500,6 +503,7 @@ class MainWindow(QMainWindow):
             progress(1.0, "合并完成")
             return result
 
+        self._job_actions[job_id] = "合并"
         self.runner.submit(job_id, job)
         self.statusBar().showMessage(f"已提交合并任务 {job_id}。")
 
@@ -579,24 +583,25 @@ class MainWindow(QMainWindow):
             Path(file_path).name,
             output,
         )
+        self._job_actions[new_job_id] = "美化"
         self.runner.submit(new_job_id, job)
         self.statusBar().showMessage(f"已提交美化任务 {new_job_id}。")
 
     def _submit_job(self, job_id: str, file_path: str, action: str, options: dict) -> None:
         job = build_job_func(self.registry, file_path, action, options)
-        self.table.set_action(job_id, action_label(action))
+        self._job_actions[job_id] = action_label(action)
         self.runner.submit(job_id, job)
 
     # ---- Runner 信号回调（在主线程执行） ----
     def _on_started(self, job_id: str) -> None:
-        self.table.set_status(job_id, "处理中")
+        self.table.set_status(job_id, "处理进行中")
 
     def _on_progress(self, frac: float, msg: str) -> None:
         self.progress_bar.setValue(int(frac * 100))
         self.progress_label.setText(msg)
 
     def _on_finished(self, job_id: str, result) -> None:
-        self.table.set_status(job_id, "成功")
+        self.table.set_status(job_id, f"{self._job_actions.get(job_id, '操作')}成功")
         self._show_result(result)
         self.statusBar().showMessage(f"{job_id} 完成。")
 
@@ -622,7 +627,7 @@ class MainWindow(QMainWindow):
 
     def _on_failed(self, job_id: str, msg: str) -> None:
         logger.error("任务失败信号: job_id={} msg={}", job_id, msg)
-        self.table.set_status(job_id, f"失败: {msg[:40]}")
+        self.table.set_status(job_id, f"{self._job_actions.get(job_id, '操作')}失败")
         self.statusBar().showMessage(f"{job_id} 失败：{msg}")
 
     def closeEvent(self, event) -> None:

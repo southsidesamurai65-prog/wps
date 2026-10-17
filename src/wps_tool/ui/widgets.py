@@ -1,7 +1,7 @@
 """UI 组件（已写好，学生不要改）。
 
 - DropArea：拖拽区，拖入文件后发 files_dropped 信号；
-- FileTable：文件列表表格（文件/类型/操作/状态）；
+- FileTable：文件列表表格（选/文件/类型/状态）；
 - build_job_func：构造交给 Runner 的 job 函数（func(progress, ...) 签名），
   它内部走 Registry → Processor。是 UI 与三层 TODO 的接线点。
 
@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-# 扩展名 → 默认操作，供 UI 预填操作列。
+# 扩展名 → 默认操作（备查/扩展用）。
 _DEFAULT_ACTION: dict[str, str] = {
     ".pdf": "extract_text",
     ".docx": "extract_text",
@@ -34,7 +34,7 @@ _DEFAULT_ACTION: dict[str, str] = {
     ".jpeg": "to_pdf",
 }
 
-# 操作 id → 中文显示名（下拉框与表格「操作」列用中文；内部仍传 id）。
+# 操作 id → 中文显示名（下拉框显示与状态条用中文；内部仍传 id）。
 ACTION_LABELS: dict[str, str] = {
     "extract_text": "提取文本",
     "analyze_structure": "分析结构",
@@ -118,14 +118,13 @@ class DropArea(QFrame):
 
 
 class FileTable(QTableWidget):
-    """文件列表：列 = [选, 文件, 类型, 操作, 状态]。勾选框用于多选（可不连续）。"""
+    """文件列表：列 = [选, 文件, 类型, 状态]。勾选框用于多选（可不连续）。"""
 
-    COLUMNS = ["选", "文件", "类型", "操作", "状态"]
+    COLUMNS = ["选", "文件", "类型", "状态"]
     CHECK_COL = 0
     NAME_COL = 1
     TYPE_COL = 2
-    ACTION_COL = 3
-    STATUS_COL = 4
+    STATUS_COL = 3
 
     def __init__(self, parent=None) -> None:
         super().__init__(0, len(self.COLUMNS), parent)
@@ -157,10 +156,7 @@ class FileTable(QTableWidget):
             self.setItem(row, self.CHECK_COL, check)
             self.setItem(row, self.NAME_COL, QTableWidgetItem(Path(p).name))
             self.setItem(row, self.TYPE_COL, QTableWidgetItem(ext or "?"))
-            self.setItem(
-                row, self.ACTION_COL, QTableWidgetItem(action_label(default_action_for(p)))
-            )
-            self.setItem(row, self.STATUS_COL, QTableWidgetItem("等待中"))
+            self.setItem(row, self.STATUS_COL, QTableWidgetItem("等待处理"))
             added.append((job_id, p))
         return added
 
@@ -217,11 +213,6 @@ class FileTable(QTableWidget):
         row = self.row_for_job(job_id)
         if row >= 0:
             self.item(row, self.STATUS_COL).setText(status)
-
-    def set_action(self, job_id: str, action_label: str) -> None:
-        row = self.row_for_job(job_id)
-        if row >= 0:
-            self.item(row, self.ACTION_COL).setText(action_label)
 
 
 def build_job_func(registry, file_path: str, action: str, options: dict):
