@@ -6,17 +6,22 @@ cd /d "%~dp0.."
 
 if exist ".venv-win\Scripts\python.exe" goto have_venv
 
-echo [1/3] Creating Windows venv .venv-win ...
+echo [1/4] Creating Windows venv .venv-win ...
 python -m venv .venv-win
 if errorlevel 1 goto err
 
 :have_venv
-echo [2/3] Installing dependencies (first run is slow) ...
+echo [2/4] Installing dependencies (first run is slow) ...
 ".venv-win\Scripts\python.exe" -m pip install --upgrade pip >nul
 ".venv-win\Scripts\python.exe" -m pip install -e ".[dev]"
 if errorlevel 1 goto err
 
-echo [3/3] Building ...
+echo [3/4] Stopping any running wps-tool.exe ...
+taskkill /F /IM wps-tool.exe >nul 2>&1
+REM remove stale exe so PyInstaller can overwrite it (avoids WinError 5)
+if exist "dist\wps-tool.exe" del /f /q "dist\wps-tool.exe" >nul 2>&1
+
+echo [4/4] Building ...
 ".venv-win\Scripts\python.exe" -m PyInstaller packaging\wps_tool.spec --noconfirm
 if errorlevel 1 goto err
 
@@ -28,6 +33,9 @@ exit /b 0
 
 :err
 echo.
-echo Build failed. Please send the error above to the developer.
+echo Build failed. Common causes:
+echo   - wps-tool.exe is still running: close it, then run this again.
+echo   - Antivirus locking dist\wps-tool.exe: add the repo folder to the allow list.
+echo   - If it still fails, send the error above to the developer.
 pause
 exit /b 1
