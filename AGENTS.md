@@ -28,8 +28,9 @@ virtualenv, *not* the package (the package is `src/wps_tool`). System `python3` 
 ## Layout / wiring
 
 - `src/wps_tool/core/` dispatch + execution (`registry.py`, `task.py`, `runner_iface.py`);
-  `processors/` per-format algorithms; `services/` external capabilities (LibreOffice, OCR,
-  PPT beautify API); `ui/` UI only; `models/` settings + `FileJob`; `utils/` paths/logging.
+  `processors/` per-format algorithms (`scan_processor.py` = 文档扫描 CV/PDF 管线);
+  `services/` external capabilities (LibreOffice, OCR, PPT beautify API); `ui/` UI only
+  (`scan_dialog.py` = 扫描窗口); `models/` settings + `FileJob`; `utils/` paths/logging.
 - Entrypoint: `app.py::main` assembles `Settings` + `ProcessorRegistry` + runner + `MainWindow`.
 - **`app.py::build_runner` still returns `SyncTaskRunner`**, so the UI runs jobs synchronously
   even though `core/task.py::TaskRunner` is implemented. Switch it to `TaskRunner(...)` to get
@@ -37,6 +38,8 @@ virtualenv, *not* the package (the package is `src/wps_tool`). System `python3` 
 - Worker threads must only emit `TaskSignals` — never touch widgets directly (Qt auto-queues).
 - UI action dropdown shows Chinese labels but stores internal ids as item data; read via
   `action_combo.currentData()`, not `currentText()`.
+- 主窗口参数区由 `main_window.py` 的 `_ACTION_PARAMS` / `_ACTION_HINTS` 驱动，只显示当前功能
+  用得到的参数。新增 action 时两个表和 `_build_options` 要一起更新，否则参数不显示/不生效。
 
 ## Gotchas
 
@@ -59,4 +62,19 @@ virtualenv, *not* the package (the package is `src/wps_tool`). System `python3` 
 - Packaging: `packaging/wps_tool.spec` + `launcher.py` (needs `pyinstaller`, in `[dev]`). PyInstaller
   can't cross-compile; `.github/workflows/build.yml` builds all three OSes. Frozen app reads `.env`
   next to the executable (`app.py::_settings_env_file`), not cwd.
+
+## 文档扫描（scan）注意事项
+
+- 核心算法在 `processors/scan_processor.py`，UI 在 `ui/scan_dialog.py`；`main_window` 里**延迟 import**
+  扫描窗口，避免启动时就拉起 cv2/fitz/onnxruntime。
+- 图片读写一律走 Pillow（`load_image`）。不要改用 `cv2.imread/imwrite`：Windows 中文路径会静默失败。
+- 纸张四角在 `ScanPage.corners` 里是**归一化坐标**（TL/TR/BR/BL），预览/缩略图/全分辨率导出共用。
+- 导出/OCR 在 QThread 里跑；`ScanDialog.reject()` 会拒绝在线程运行时关闭窗口。
+- `add_watermark` 对非 ASCII 文本会自动找系统中文字体（Windows 用 msyh）；找不到时退回内置字体。
+- 扫描窗口只负责裁边/滤镜/签名/导出 PDF/JPG；**PDF 加密/水印不要在这里重复实现**，
+  导出后走主界面已有的 `encrypt` / `watermark` 动作。
+- 扫描窗口不做 OCR：需要文字时用主界面「提取文本」对原始图片识别。扫描导出的 PDF 是图片型，
+  主界面 `extract_text` 只读文本层，读不到扫描件文字（不要指望对扫描 PDF 直接提取）。
+- 扫描测试 `tests/test_scan_processor.py` 现场生成带透视的文档照片，不依赖二进制 fixture。
+- `opencv-python` 现在是直接依赖；PyInstaller spec 的 `collect_all` 已包含 `cv2`。
 - Commit style: Conventional Commits with Chinese scope/message, e.g. `feat(pdf): …`, `docs(readme): …`.

@@ -208,6 +208,23 @@ def decrypt_pdf(input_path: str, output_path: str, password: str) -> str:
     return output_path
 
 
+def _cjk_font() -> tuple[str, str] | None:
+    """找一个系统可用的中文字体（找不到就返回 None，退回内置字体）。"""
+    candidates = (
+        ("msyh", r"C:\Windows\Fonts\msyh.ttc"),
+        ("msyhbd", r"C:\Windows\Fonts\msyhbd.ttc"),
+        ("simhei", r"C:\Windows\Fonts\simhei.ttf"),
+        ("simsun", r"C:\Windows\Fonts\simsun.ttc"),
+        ("pingfang", "/System/Library/Fonts/PingFang.ttc"),
+        ("noto", "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+        ("wqy", "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
+    )
+    for name, path in candidates:
+        if Path(path).exists():
+            return name, path
+    return None
+
+
 def add_watermark(
     input_path: str,
     output_path: str,
@@ -216,16 +233,34 @@ def add_watermark(
     font_size: float = 48,
     opacity: float = 0.25,
     angle: int = 45,
+    fontname: str | None = None,
+    fontfile: str | None = None,
 ) -> str:
     """给每页叠加半透明文字水印（默认斜 45°），返回 output_path。
 
     用 fitz 的 ``fill_opacity`` + ``morph``（绕页面中心旋转）实现斜体水印；
     ``angle`` 取 0 时水平居中。文字是真实文本，可被 ``get_text()`` 提取。
+    非 ASCII 水印（中文等）会自动找系统中文字体，避免内置 Helvetica 渲染成乱码。
     """
+    if fontname is None and fontfile is None and any(ord(ch) > 127 for ch in text):
+        found = _cjk_font()
+        if found is not None:
+            fontname, fontfile = found
+    font = fitz.Font(fontfile=fontfile) if fontfile else None
+    extra = {}
+    if fontname:
+        extra["fontname"] = fontname
+    if fontfile:
+        extra["fontfile"] = fontfile
     doc = fitz.open(input_path)
     for page in doc:
         rect = page.rect
-        width = fitz.get_text_length(text, fontsize=font_size)
+        if font is not None:
+            width = font.text_length(text, fontsize=font_size)
+        else:
+            width = fitz.get_text_length(
+                text, fontsize=font_size, fontname=fontname or "helv"
+            )
         start = fitz.Point((rect.width - width) / 2, rect.height / 2)
         pivot = fitz.Point(rect.width / 2, rect.height / 2)
         # rotate 只接受 90 的倍数，任意角度用 morph(绕 pivot 的旋转矩阵)
@@ -236,6 +271,7 @@ def add_watermark(
             color=(0.6, 0.6, 0.6),
             fill_opacity=opacity,
             morph=(pivot, fitz.Matrix(angle)) if angle else None,
+            **extra,
         )
     doc.save(output_path)
     doc.close()

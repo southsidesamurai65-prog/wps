@@ -21,7 +21,7 @@ datas, binaries, hiddenimports = [], [], []
 # 这些库带数据文件（模板/字体等），必须显式收集，否则打包后运行报错。
 for pkg in (
     "pptx", "docx", "fitz", "pymupdf", "pydantic_settings", "loguru",
-    "rapidocr_onnxruntime", "onnxruntime",  # OCR 引擎与模型
+    "rapidocr_onnxruntime", "onnxruntime", "cv2",  # OCR / 文档扫描
 ):
     try:
         d, b, h = collect_all(pkg)

@@ -46,6 +46,56 @@ from wps_tool.models.settings import Settings
 from wps_tool.ui.widgets import DropArea, FileTable, action_label, build_job_func
 from wps_tool.utils.logging import logger
 
+# 每个功能实际会用到的参数 key；参数区据此只显示相关项。
+_ACTION_PARAMS: dict[str, set[str]] = {
+    "extract_text": set(),
+    "extract_images": set(),
+    "analyze_structure": set(),
+    "to_word": set(),
+    "split": set(),
+    "page_numbers": set(),
+    "to_pdf": set(),
+    "scan": set(),
+    "rotate": {"angle"},
+    "rotate_image": {"angle"},
+    "extract_pages": {"pages"},
+    "to_images": {"zoom"},
+    "compress": {"quality"},
+    "encrypt": {"password"},
+    "decrypt": {"password"},
+    "watermark": {"watermark"},
+    "remove_watermark": {"watermark"},
+    "resize": {"size"},
+    "convert": {"format"},
+    "replace": {"replace"},
+    "replace_tokens": {"replace"},
+}
+
+# 功能下拉切换时显示的一行说明。
+_ACTION_HINTS: dict[str, str] = {
+    "extract_text": "直接提取文本，无需额外参数。",
+    "extract_images": "把内嵌图片提取到输出目录。",
+    "analyze_structure": "直接分析结构，无需额外参数。",
+    "to_word": "基于 PDF 文本层转 Word；纯扫描件请先 OCR。",
+    "split": "每页拆成一个单独的 PDF。",
+    "page_numbers": "在每页底部居中加页码。",
+    "to_pdf": "每张勾选图片分别生成一个 PDF。",
+    "scan": "文档扫描：在弹出窗口中裁边、滤镜、签名并导出；输出目录作为默认位置。",
+    "rotate": "顺时针旋转 PDF 的所有页。",
+    "rotate_image": "顺时针旋转图片。",
+    "extract_pages": "0-based 页码，如 0,2,5；留空 = 第 1 页。",
+    "to_images": "倍率越高越清晰，文件也越大。",
+    "compress": "JPEG 质量越低，文件越小。",
+    "encrypt": "给 PDF 设置打开密码。",
+    "decrypt": "输入原密码后移除加密。",
+    "watermark": "留空默认使用 CONFIDENTIAL。",
+    "remove_watermark": "留空自动识别；填文字则只删该文字。",
+    "resize": "高度填 0 = 按宽度等比缩放。",
+    "convert": "按目标格式重新编码。",
+    "replace": "格式：旧=新; 旧2=新2。",
+    "replace_tokens": "格式：旧=新; 旧2=新2。",
+}
+
 
 class MainWindow(QMainWindow):
     def __init__(
@@ -64,7 +114,7 @@ class MainWindow(QMainWindow):
         self.beautify_client = beautify_client
         # job_id -> 中文操作名，用于状态显示「xx成功 / xx失败」。
         self._job_actions: dict[str, str] = {}
-        self.setWindowTitle("WPS 工具箱 — 本地 Office/PDF 处理")
+        self.setWindowTitle("WPS 工具箱 — 本地 Office/PDF/扫描处理")
         self.resize(1180, 880)
 
         self._build_toolbar()
@@ -78,6 +128,7 @@ class MainWindow(QMainWindow):
         tb = self.addToolBar("主工具栏")
         tb.setMovable(False)
         tb.addAction("打开文件…", self._on_open_files)
+        tb.addAction("文档扫描…", self._on_scan)
         tb.addAction("设置输出目录…", self._on_pick_output_dir)
         tb.addSeparator()
         tb.addAction("全选/全不选", self._on_toggle_check_all)
@@ -101,90 +152,159 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(central)
 
+    def _make_param(
+        self, label_text: str, *widgets, tooltip: str | None = None
+    ) -> QWidget:
+        """把「标签 + 控件」包成一个可整体显示/隐藏的小组件。"""
+        wrapper = QWidget()
+        layout = QHBoxLayout(wrapper)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        label = QLabel(label_text)
+        layout.addWidget(label)
+        for widget in widgets:
+            layout.addWidget(widget)
+        if tooltip:
+            wrapper.setToolTip(tooltip)
+            label.setToolTip(tooltip)
+            for widget in widgets:
+                if not widget.toolTip():
+                    widget.setToolTip(tooltip)
+        return wrapper
+
     def _build_params(self) -> QWidget:
         box = QWidget()
         outer = QVBoxLayout(box)
         outer.setContentsMargins(0, 4, 0, 4)
-        outer.setSpacing(4)
+        outer.setSpacing(6)
 
-        # 第一行：操作 / 输出目录 / 替换映射
-        row1 = QHBoxLayout()
-        row1.addWidget(QLabel("功能:"))
+        self._param_widgets: dict[str, QWidget] = {}
+
         self.action_combo = QComboBox()
         self._populate_actions()
-        self.action_combo.setMinimumWidth(170)
-        row1.addWidget(self.action_combo)
-        row1.addSpacing(12)
-        row1.addWidget(QLabel("输出目录:"))
+        self.action_combo.setMinimumWidth(190)
+        self.action_combo.setToolTip("选择功能；下方只显示该功能用得到的参数。")
+        self.action_combo.currentIndexChanged.connect(self._on_action_changed)
+
         self.output_edit = QLineEdit(self.settings.default_output_dir or "")
         self.output_edit.setPlaceholderText("留空 = 源文件旁 processed/")
-        row1.addWidget(self.output_edit, stretch=1)
-        row1.addSpacing(12)
-        row1.addWidget(QLabel("替换映射:"))
+        output_wrap = self._make_param(
+            "输出目录:",
+            self.output_edit,
+            tooltip="留空 = 源文件旁 processed/；文档扫描用它作为默认导出位置。",
+        )
+
         self.replace_edit = QLineEdit()
         self.replace_edit.setPlaceholderText("旧文本=新文本，多个用 ; 分隔")
-        row1.addWidget(self.replace_edit, stretch=1)
+        self._param_widgets["replace"] = self._make_param(
+            "替换映射:",
+            self.replace_edit,
+            tooltip="仅替换文本/占位符使用：旧=新; 旧2=新2。",
+        )
+
+        row1 = QHBoxLayout()
+        row1.setSpacing(14)
+        row1.addWidget(QLabel("功能:"))
+        row1.addWidget(self.action_combo)
+        row1.addWidget(output_wrap, 1)
+        row1.addWidget(self._param_widgets["replace"], 1)
         outer.addLayout(row1)
 
-        # 第二行：动作参数（按选用动作生效；不用到就忽略）
-        row2 = QHBoxLayout()
-        row2.addWidget(QLabel("角度:"))
         self.angle_combo = QComboBox()
         self.angle_combo.addItems(["90", "180", "270"])
-        row2.addWidget(self.angle_combo)
-        row2.addSpacing(12)
-        row2.addWidget(QLabel("质量:"))
+        self._param_widgets["angle"] = self._make_param(
+            "角度:", self.angle_combo, tooltip="顺时针旋转角度。"
+        )
+
         self.quality_spin = QSpinBox()
         self.quality_spin.setRange(1, 95)
         self.quality_spin.setValue(85)
         self.quality_spin.setSuffix(" %")
-        row2.addWidget(self.quality_spin)
-        row2.addSpacing(12)
-        row2.addWidget(QLabel("倍率:"))
+        self._param_widgets["quality"] = self._make_param(
+            "质量:",
+            self.quality_spin,
+            tooltip="仅「压缩图片」使用：JPEG 质量越低文件越小。",
+        )
+
         self.zoom_spin = QDoubleSpinBox()
         self.zoom_spin.setRange(0.5, 5.0)
         self.zoom_spin.setSingleStep(0.5)
         self.zoom_spin.setValue(2.0)
         self.zoom_spin.setSuffix(" ×")
-        row2.addWidget(self.zoom_spin)
-        row2.addSpacing(12)
-        row2.addWidget(QLabel("页码:"))
+        self._param_widgets["zoom"] = self._make_param(
+            "倍率:",
+            self.zoom_spin,
+            tooltip="仅「转成图片」使用：倍率越高越清晰、文件越大。",
+        )
+
         self.pages_edit = QLineEdit()
         self.pages_edit.setPlaceholderText("0,2（0-based，逗号分隔；留空=第1页）")
-        row2.addWidget(self.pages_edit, stretch=1)
-        outer.addLayout(row2)
+        self._param_widgets["pages"] = self._make_param(
+            "页码:",
+            self.pages_edit,
+            tooltip="仅「抽取页面」使用：0-based 页码，留空 = 第 1 页。",
+        )
 
-        # 第二行补充：PDF 加密/水印 + 图片缩放/转换参数（按选用动作生效）
-        row2b = QHBoxLayout()
-        row2b.addWidget(QLabel("密码:"))
         self.password_edit = QLineEdit()
         self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.password_edit.setPlaceholderText("加密/解密用")
-        row2b.addWidget(self.password_edit)
-        row2b.addSpacing(12)
-        row2b.addWidget(QLabel("水印:"))
+        self._param_widgets["password"] = self._make_param(
+            "密码:", self.password_edit, tooltip="仅 PDF 加密/解密使用。"
+        )
+
         self.watermark_edit = QLineEdit()
         self.watermark_edit.setPlaceholderText("水印文字（默认 CONFIDENTIAL）")
-        row2b.addWidget(self.watermark_edit, stretch=1)
-        row2b.addSpacing(12)
-        row2b.addWidget(QLabel("宽×高:"))
+        self._param_widgets["watermark"] = self._make_param(
+            "水印:",
+            self.watermark_edit,
+            tooltip="仅 PDF 加水印/去水印使用；去水印留空 = 自动识别。",
+        )
+
         self.width_spin = QSpinBox()
         self.width_spin.setRange(1, 20000)
         self.width_spin.setValue(800)
-        row2b.addWidget(self.width_spin)
-        row2b.addWidget(QLabel("×"))
         self.height_spin = QSpinBox()
         self.height_spin.setRange(0, 20000)
         self.height_spin.setValue(0)
         self.height_spin.setSpecialValueText("自动")
         self.height_spin.setToolTip("0 = 按宽度等比缩放")
-        row2b.addWidget(self.height_spin)
-        row2b.addSpacing(12)
-        row2b.addWidget(QLabel("格式:"))
+        self._param_widgets["size"] = self._make_param(
+            "宽×高:",
+            self.width_spin,
+            QLabel("×"),
+            self.height_spin,
+            tooltip="仅「缩放图片」使用；高度 0 = 按宽度等比。",
+        )
+
         self.format_combo = QComboBox()
         self.format_combo.addItems(["png", "jpg", "jpeg", "webp", "bmp"])
-        row2b.addWidget(self.format_combo)
-        outer.addLayout(row2b)
+        self._param_widgets["format"] = self._make_param(
+            "格式:", self.format_combo, tooltip="仅「转换格式」使用。"
+        )
+
+        self._row2_box = QWidget()
+        row2 = QHBoxLayout(self._row2_box)
+        row2.setContentsMargins(0, 0, 0, 0)
+        row2.setSpacing(16)
+        for key in (
+            "angle",
+            "quality",
+            "zoom",
+            "pages",
+            "password",
+            "watermark",
+            "size",
+            "format",
+        ):
+            stretch = 1 if key in ("pages", "watermark") else 0
+            row2.addWidget(self._param_widgets[key], stretch)
+        row2.addStretch(1)
+        outer.addWidget(self._row2_box)
+
+        self.param_hint = QLabel("")
+        self.param_hint.setStyleSheet("color:#5a6270;")
+        self.param_hint.setWordWrap(True)
+        outer.addWidget(self.param_hint)
 
         # 第三行：动作按钮（勾选 = 表格第一列）
         row3 = QHBoxLayout()
@@ -206,7 +326,24 @@ class MainWindow(QMainWindow):
         row3.addWidget(self.delete_btn)
         row3.addStretch(1)
         outer.addLayout(row3)
+
+        self._update_param_visibility()
         return box
+
+    def _on_action_changed(self, _index: int) -> None:
+        self._update_param_visibility()
+
+    def _update_param_visibility(self) -> None:
+        """只显示当前功能用得到的参数，并更新一行说明。"""
+        action = self.action_combo.currentData() or ""
+        keys = _ACTION_PARAMS.get(action, set())
+        for key, widget in self._param_widgets.items():
+            widget.setVisible(key in keys)
+        self._row2_box.setVisible(bool(keys))
+        hint = _ACTION_HINTS.get(action, "")
+        self.param_hint.setText(hint)
+        self.param_hint.setVisible(bool(hint))
+
 
     def _populate_actions(self) -> None:
         """按文档类型分区填充功能下拉：普通条目 + 分隔线，标签自带类型名。
@@ -237,6 +374,7 @@ class MainWindow(QMainWindow):
             ],
             [("替换文本（Word）", "replace")],
             [
+                ("文档扫描（生成 PDF）", "scan"),
                 ("图片转 PDF", "to_pdf"),
                 ("压缩图片", "compress"),
                 ("缩放图片", "resize"),
@@ -288,6 +426,45 @@ class MainWindow(QMainWindow):
     # ---- 事件处理 ----
     def _on_open_files(self) -> None:
         self.drop_area._open_dialog()  # 复用 DropArea 的文件对话框
+
+    def _on_scan(self) -> None:
+        """工具栏「文档扫描」：优先用勾选的图片，没勾选就打开空扫描窗口。"""
+        paths = []
+        for job_id in self.table.checked_job_ids():
+            file_path = self.table.path_for(job_id)
+            if file_path:
+                paths.append(file_path)
+        self._open_scan_dialog(paths, self.output_edit.text().strip())
+
+    def _open_scan_dialog(self, paths: list[str], output_dir: str) -> None:
+        """打开文档扫描窗口；只接受图片，导出后把结果加回文件表。"""
+        from wps_tool.ui.scan_dialog import ScanDialog
+
+        suffixes = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
+        image_paths = [p for p in paths if Path(p).suffix.lower() in suffixes]
+        if paths and not image_paths:
+            self.statusBar().showMessage(
+                "文档扫描只支持 jpg / png / bmp / webp / tif 图片。"
+            )
+            return
+        if not output_dir and image_paths:
+            output_dir = str(Path(image_paths[0]).parent / "processed")
+        try:
+            dialog = ScanDialog(
+                paths=image_paths, output_dir=output_dir, parent=self
+            )
+            dialog.exec()
+        except Exception as exc:  # noqa: BLE001 - UI 异常统一提示
+            logger.exception("打开文档扫描窗口失败")
+            self.statusBar().showMessage(f"打开扫描窗口失败：{exc}")
+            return
+        result = dialog.exported_result
+        if not result:
+            return
+        self._show_result(result)
+        exported = result if isinstance(result, list) else [result]
+        added = self.table.add_files([str(p) for p in exported if Path(p).exists()])
+        self.statusBar().showMessage(f"扫描导出完成，已加入 {len(added)} 个文件。")
 
     def _on_files_dropped(self, paths: list[str]) -> None:
         added = self.table.add_files(paths)
@@ -346,6 +523,15 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("请先选择一个操作。")
             return
         raw_out = self.output_edit.text().strip()
+        if action == "scan":
+            paths = []
+            for row in rows:
+                job_id = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+                file_path = self.table.path_for(job_id)
+                if file_path:
+                    paths.append(file_path)
+            self._open_scan_dialog(paths, raw_out)
+            return
         if action in ("replace", "replace_tokens") and not self._parse_mapping(
             self.replace_edit.text()
         ):

@@ -70,6 +70,52 @@ QPushButton:default {
 }
 QPushButton:default:hover { background: #1d4ed8; }
 QPushButton:disabled { color: #9aa1ad; background: #f1f3f7; border-color: #e4e8ef; }
+QPushButton:checked {
+    background: #e8efff;
+    border-color: #2563eb;
+    color: #1d4ed8;
+}
+
+/* ---- 分组框 / 选项卡 / 列表 ---- */
+QGroupBox {
+    background: #ffffff;
+    border: 1px solid #e4e8ef;
+    border-radius: 10px;
+    margin-top: 10px;
+    padding: 10px 8px 8px 8px;
+    font-weight: 600;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0 4px;
+    color: #1f2329;
+}
+QTabWidget::pane {
+    background: #ffffff;
+    border: 1px solid #e4e8ef;
+    border-radius: 10px;
+    top: -1px;
+}
+QTabBar::tab {
+    background: #eef1f6;
+    border: 1px solid #e4e8ef;
+    border-bottom: none;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    padding: 7px 18px;
+    margin-right: 3px;
+}
+QTabBar::tab:selected { background: #ffffff; color: #1d4ed8; }
+QListWidget {
+    background: #ffffff;
+    border: 1px solid #e4e8ef;
+    border-radius: 10px;
+    padding: 4px;
+    outline: 0;
+}
+QListWidget::item { border-radius: 8px; padding: 4px; }
+QListWidget::item:selected { background: #e8efff; color: #1f2329; }
 
 /* ---- 表格 ---- */
 QTableWidget {

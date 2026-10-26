@@ -29,6 +29,13 @@ def _get_engine():
     return _engine
 
 
+def _result_to_text(result) -> str:
+    """把 RapidOCR 的 ``[[box, text, score], ...]`` 拼成行文本。"""
+    if not result:
+        return ""
+    return "\n".join(line[1] for line in result if len(line) > 1 and line[1])
+
+
 def ocr_image(image_path: str, lang: str = "chi_sim+eng") -> str:
     """对图片做 OCR，返回识别文本（行间用 ``\\n`` 连接）。
 
@@ -37,9 +44,7 @@ def ocr_image(image_path: str, lang: str = "chi_sim+eng") -> str:
     """
     engine = _get_engine()
     result, _elapse = engine(image_path)
-    if not result:
-        return ""
-    return "\n".join(line[1] for line in result if len(line) > 1 and line[1])
+    return _result_to_text(result)
 
 
 __all__ = ["ocr_available", "ocr_image"]

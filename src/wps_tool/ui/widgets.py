@@ -56,6 +56,7 @@ ACTION_LABELS: dict[str, str] = {
     "resize": "缩放图片",
     "convert": "转换格式",
     "rotate_image": "旋转图片",
+    "scan": "文档扫描",
 }
 
 
@@ -111,7 +112,7 @@ class DropArea(QFrame):
             self,
             "选择文件",
             "",
-            "文档 (*.pdf *.docx *.pptx *.png *.jpg *.jpeg);;所有文件 (*.*)",
+            "文档 (*.pdf *.docx *.pptx *.png *.jpg *.jpeg *.bmp *.webp *.tif *.tiff);;所有文件 (*.*)",
         )
         if paths:
             self.files_dropped.emit(paths)
